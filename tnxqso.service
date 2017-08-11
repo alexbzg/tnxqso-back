@@ -1,0 +1,12 @@
+[Unit]
+Description=tnxqso backend server
+After=network.target postgresql@9.4-main.service 
+
+[Service]
+ExecStart=/usr/local/tnxqso/srv.py --path=/tmp/tnxqso.socket
+Restart=always
+User=www-data
+Group=www-data
+
+[Install]
+WantedBy=multi-user.target
