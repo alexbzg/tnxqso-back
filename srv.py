@@ -1,7 +1,7 @@
 #!/usr/bin/python3
 #coding=utf-8
 
-import argparse, asyncio, logging, logging.handlers, aiohttp, psycopg2
+import argparse, asyncio, logging, logging.handlers, aiohttp, jwt, os, base64
 from aiohttp import web
 from common import siteConf
 from tqdb import db, spliceParams
@@ -10,16 +10,28 @@ parser = argparse.ArgumentParser(description="tnxqso backend aiohttp server")
 parser.add_argument('--path')
 parser.add_argument('--port')
 
+conf = siteConf()
+
+fpLog = conf.get( 'files', 'log' ) 
 logger = logging.getLogger('')
 logger.setLevel( logging.DEBUG )
-loggerHandler = logging.handlers.WatchedFileHandler('/var/log/tnxqso.aiohttp.log')
+loggerHandler = logging.handlers.WatchedFileHandler( fpLog )
 loggerHandler.setLevel( logging.DEBUG )
 loggerHandler.setFormatter( logging.Formatter( \
     '%(asctime)s %(name)-12s %(levelname)-8s %(message)s' ) )
 logger.addHandler( loggerHandler )
 logger.debug( "restart" )
 
-conf = siteConf()
+secret = None
+fpSecret = conf.get( 'files', 'secret' )
+if ( os.path.isfile( fpSecret ) ):
+    with open( fpSecret, 'rb' ) as fSecret:
+        secret = fSecret.read()
+if not secret:
+    secret = base64.b64encode( os.urandom( 64 ) )
+    with open( fpSecret, 'wb' ) as fSecret:
+        fSecret.write( str( secret ) )
+
 
 @asyncio.coroutine
 def checkRecaptcha( response ):
@@ -35,8 +47,10 @@ def checkRecaptcha( response ):
         logging.exception( 'Recaptcha error' )
         return False
 
-def getUserData( callsign, password = None ):
-    return { 'callsign': callsign }
+@asyncio.coroutine
+def getUserData( callsign ):
+    return ( yield from db.getObject( 'users', \
+            { 'callsign': callsign }, False, True ) )
 
 @asyncio.coroutine
 def loginHandler(request):
@@ -47,21 +61,29 @@ def loginHandler(request):
     if not 'password' in data or len( data['password'] ) < 6:
         error = 'Minimal password length is 6 symbols'
     if not error:
+        userData = yield from getUserData( data['login'] )
         if data['newUser']:
             rcTest = yield from checkRecaptcha( data['recaptcha'] )
             if not rcTest:
                 error = 'Recaptcha test failed. Please try again'
             else:
-                logging.debug( 'call db.getObject' )
-                yield from db.getObject( 'users', \
-                    { 'callsign': data['login'], \
-                    'password': data['password'] }, True )
+                if userData:
+                    error = 'This callsign is already registered.'
+                else:
+                    yield from db.getObject( 'users', \
+                        { 'callsign': data['login'], \
+                        'password': data['password'] }, True )
         else:
-            pass
+            if not userData:
+                error = 'This callsign is not registerd yet.'
+            elif userData['password'] != data['password']:
+                error = 'Wrong password.'            
     if error:
         return web.HTTPBadRequest( text = error )
     else:
-        return web.json_response( getUserData( data['login'] ) )
+        return web.json_response( { 'callsign': data['login'], \
+            'token': jwt.encode( { 'callsign': data['login'] }, \
+                secret, algorithm='HS256' ).decode('utf-8') } )
 
 
 if __name__ == '__main__':
