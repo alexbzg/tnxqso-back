@@ -3,7 +3,7 @@
 
 import argparse, asyncio, logging, logging.handlers, aiohttp, jwt, os, base64
 from aiohttp import web
-from common import siteConf
+from common import siteConf, loadJSON, appRoot
 from tqdb import db, spliceParams
 
 parser = argparse.ArgumentParser(description="tnxqso backend aiohttp server")
@@ -32,6 +32,10 @@ if not secret:
     with open( fpSecret, 'wb' ) as fSecret:
         fSecret.write( str( secret ) )
 
+defUserSettings = loadJSON( appRoot + '/defaultUserSettings.json' )
+if not defUserSettings:
+    defUserSettings = {}
+
 
 @asyncio.coroutine
 def checkRecaptcha( response ):
@@ -56,6 +60,7 @@ def getUserData( callsign ):
 def loginHandler(request):
     error = None
     data = yield from request.json()
+    userData = False
     if not 'login' in data or len( data['login'] ) < 2:
         error = 'Minimal login length is 2 symbols'
     if not 'password' in data or len( data['password'] ) < 6:
@@ -70,9 +75,10 @@ def loginHandler(request):
                 if userData:
                     error = 'This callsign is already registered.'
                 else:
-                    yield from db.getObject( 'users', \
+                    userData = yield from db.getObject( 'users', \
                         { 'callsign': data['login'], \
-                        'password': data['password'] }, True )
+                        'password': data['password'], \
+                        'settings': data['settings'] }, True )
         else:
             if not userData:
                 error = 'This callsign is not registerd yet.'
@@ -81,9 +87,10 @@ def loginHandler(request):
     if error:
         return web.HTTPBadRequest( text = error )
     else:
-        return web.json_response( { 'callsign': data['login'], \
-            'token': jwt.encode( { 'callsign': data['login'] }, \
-                secret, algorithm='HS256' ).decode('utf-8') } )
+        userData['token'] = jwt.encode( { 'callsign': data['login'] }, \
+                secret, algorithm='HS256' ).decode('utf-8') 
+        del userData['password']
+        return web.json_response( userData )
 
 
 if __name__ == '__main__':
