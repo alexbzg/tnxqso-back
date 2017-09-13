@@ -1,31 +1,31 @@
 {
-    "publish": True,
+    "publish": true,
     "station": { 
         "callsign": "",
         "title": "",
         "info": ""
     },
     "enable": {
-        "news": True,
-        "log": True,
-        "cluster": True,
-        "chat": True,
-        "map": True,
-        "donate": True,
-        "instagram": True
+        "news": true,
+        "log": true,
+        "cluster": true,
+        "chat": true,
+        "map": true,
+        "donate": true,
+        "instagram": true
     },
     "log": {
         "columns": {
-            "RDA": True,
-            "RAFA": True,
-            "WFF": True,
-            "loc": True
+            "RDA": true,
+            "RAFA": true,
+            "WFF": true,
+            "loc": true
         },
         "userColumns": [
-            { "enabled": False, "column": "" },
-            { "enabled": False, "column": "" }
+            { "enabled": false, "column": "" },
+            { "enabled": false, "column": "" }
         ]
-    }
+    },
     "clusterCallsigns": [],
     "chatAdmins": [],
     "instagramID": "",

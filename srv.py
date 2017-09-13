@@ -1,7 +1,7 @@
 #!/usr/bin/python3
 #coding=utf-8
 
-import argparse, asyncio, logging, logging.handlers, aiohttp, jwt, os, base64
+import argparse, asyncio, logging, logging.handlers, aiohttp, jwt, os, base64, json
 from aiohttp import web
 from common import siteConf, loadJSON, appRoot
 from tqdb import db, spliceParams
@@ -78,7 +78,7 @@ def loginHandler(request):
                     userData = yield from db.getObject( 'users', \
                         { 'callsign': data['login'], \
                         'password': data['password'], \
-                        'settings': data['settings'] }, True )
+                        'settings': json.dumps( defUserSettings ) }, True )
         else:
             if not userData:
                 error = 'This callsign is not registerd yet.'
