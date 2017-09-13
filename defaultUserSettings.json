@@ -1,0 +1,36 @@
+{
+    "publish": True,
+    "station": { 
+        "callsign": "",
+        "title": "",
+        "info": ""
+    },
+    "enable": {
+        "news": True,
+        "log": True,
+        "cluster": True,
+        "chat": True,
+        "map": True,
+        "donate": True,
+        "instagram": True
+    },
+    "log": {
+        "columns": {
+            "RDA": True,
+            "RAFA": True,
+            "WFF": True,
+            "loc": True
+        },
+        "userColumns": [
+            { "enabled": False, "column": "" },
+            { "enabled": False, "column": "" }
+        ]
+    }
+    "clusterCallsigns": [],
+    "chatAdmins": [],
+    "instagramID": "",
+    "donate": {
+        "text": "", 
+        "code": ""
+    }
+}
