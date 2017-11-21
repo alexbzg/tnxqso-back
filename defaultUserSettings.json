@@ -12,7 +12,8 @@
         "chat": true,
         "map": true,
         "donate": true,
-        "instagram": true
+        "instagram": true,
+        "stationInfo": true
     },
     "log": {
         "columns": {

@@ -92,10 +92,32 @@ def loginHandler(request):
         del userData['password']
         return web.json_response( userData )
 
+@asyncio.coroutine
+def userSettingsHandler(request):
+    error = None
+    data = yield from request.json()
+    error = ''
+    okResponse = ''
+    dbError = False
+    callsign = None
+    if 'token' in data:
+        try:
+            pl = jwt.decode( data['token'], secret, algorithms=['HS256'] )
+        except jwt.exceptions.DecodeError as e:
+            return web.HTTPBadRequest( text = 'Login expired' )
+        if 'callsign' in pl:
+            callsign = pl['callsign']
+    if callsign:
+        yield from db.paramUpdate( 'users', { 'callsign': callsign }, \
+            { 'settings': json.dumps( data['settings'] ) } )
+        return web.Response( text = 'OK' )
+    else:
+        return web.HTTPBadRequest( text = 'Not logged in' )
 
 if __name__ == '__main__':
     app = web.Application()
     app.router.add_post('/aiohttp/login', loginHandler)
+    app.router.add_post('/aiohttp/userSettings', userSettingsHandler)
     db.verbose = True
     asyncio.async( db.connect() )
 

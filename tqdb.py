@@ -97,8 +97,8 @@ class DBConn:
                 if self.verbose:
                     logging.debug( sql )
                     logging.debug( params )
-                yield from cur.execute( sql, params )
-                res = yield from toDict( cur )  
+                yield from cur.execute( sql, params )                                
+                res = ( yield from toDict( cur ) ) if cur.description != None else True
             except psycopg2.Error as e:
                 logging.exception( "Error executing: " + sql + "\n" )
                 stack = traceback.extract_stack()
