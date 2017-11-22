@@ -11,6 +11,7 @@ parser.add_argument('--path')
 parser.add_argument('--port')
 
 conf = siteConf()
+webRoot = conf.get( 'web', 'root' )
 
 fpLog = conf.get( 'files', 'log' ) 
 logger = logging.getLogger('')
@@ -36,6 +37,10 @@ defUserSettings = loadJSON( appRoot + '/defaultUserSettings.json' )
 if not defUserSettings:
     defUserSettings = {}
 
+jsonTemplates = { 'settings': defUserSettings, \
+    'log': {}, 'chat': {}, 'news': {}, 'cluster': {} }
+
+
 
 @asyncio.coroutine
 def checkRecaptcha( response ):
@@ -55,6 +60,9 @@ def checkRecaptcha( response ):
 def getUserData( callsign ):
     return ( yield from db.getObject( 'users', \
             { 'callsign': callsign }, False, True ) )
+
+def getStationPath( callsign ):
+    return webRoot + '/stations/' + callsign
 
 @asyncio.coroutine
 def loginHandler(request):
@@ -78,7 +86,16 @@ def loginHandler(request):
                     userData = yield from db.getObject( 'users', \
                         { 'callsign': data['login'], \
                         'password': data['password'], \
-                        'settings': json.dumps( defUserSettings ) }, True )
+                        'settings': json.dumps( defUserSettings ) }, True )                    
+                    if userData:
+                        callsign = data['login']
+                        stationPath = getStationPath( callsign )
+                        if not os.path.exists( stationPath ):
+                            os.makedirs( stationPath )
+                        for k, v in jsonTemplates.items():
+                            with open( stationPath + '/' + k + '.json', 'w' ) as f:
+                                json.dump( v, f, ensure_ascii = False )
+
         else:
             if not userData:
                 error = 'This callsign is not registerd yet.'
@@ -110,6 +127,8 @@ def userSettingsHandler(request):
     if callsign:
         yield from db.paramUpdate( 'users', { 'callsign': callsign }, \
             { 'settings': json.dumps( data['settings'] ) } )
+        with open( getStationPath( callsign ) + '/settings.json', 'w' ) as f:
+            json.dump( data['settings'], f, ensure_ascii = False )
         return web.Response( text = 'OK' )
     else:
         return web.HTTPBadRequest( text = 'Not logged in' )
