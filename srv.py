@@ -62,7 +62,7 @@ def getUserData( callsign ):
             { 'callsign': callsign }, False, True ) )
 
 def getStationPath( callsign ):
-    return webRoot + '/stations/' + callsign
+    return webRoot + '/stations/' + callsign.lower().replace( '/', '-' )
 
 @asyncio.coroutine
 def loginHandler(request):
