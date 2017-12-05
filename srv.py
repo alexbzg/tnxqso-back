@@ -1,9 +1,11 @@
 #!/usr/bin/python3
 #coding=utf-8
 
-import argparse, asyncio, logging, logging.handlers, aiohttp, jwt, os, base64, json
+import argparse, asyncio, logging, logging.handlers, aiohttp, jwt, os, base64, \
+        json, time
+from datetime import datetime
 from aiohttp import web
-from common import siteConf, loadJSON, appRoot
+from common import siteConf, loadJSON, appRoot, startLogging
 from tqdb import db, spliceParams
 
 parser = argparse.ArgumentParser(description="tnxqso backend aiohttp server")
@@ -13,15 +15,8 @@ parser.add_argument('--port')
 conf = siteConf()
 webRoot = conf.get( 'web', 'root' )
 
-fpLog = conf.get( 'files', 'log' ) 
-logger = logging.getLogger('')
-logger.setLevel( logging.DEBUG )
-loggerHandler = logging.handlers.WatchedFileHandler( fpLog )
-loggerHandler.setLevel( logging.DEBUG )
-loggerHandler.setFormatter( logging.Formatter( \
-    '%(asctime)s %(name)-12s %(levelname)-8s %(message)s' ) )
-logger.addHandler( loggerHandler )
-logger.debug( "restart" )
+startLogging( 'srv' )
+logging.debug( "restart" )
 
 secret = None
 fpSecret = conf.get( 'files', 'secret' )
@@ -38,7 +33,7 @@ if not defUserSettings:
     defUserSettings = {}
 
 jsonTemplates = { 'settings': defUserSettings, \
-    'log': {}, 'chat': {}, 'news': {}, 'cluster': {} }
+    'log': {}, 'chat': {}, 'news': {}, 'cluster': {}, 'status': {} }
 
 
 
@@ -116,6 +111,16 @@ def userSettingsHandler(request):
     error = ''
     okResponse = ''
     dbError = False
+    callsign = decodeToken( data )
+    if not isinstance( callsign, str ):
+        return callsign
+    yield from db.paramUpdate( 'users', { 'callsign': callsign }, \
+        { 'settings': json.dumps( data['settings'] ) } )
+    with open( getStationPath( callsign ) + '/settings.json', 'w' ) as f:
+        json.dump( data['settings'], f, ensure_ascii = False )
+    return web.Response( text = 'OK' )
+
+def decodeToken( data ):
     callsign = None
     if 'token' in data:
         try:
@@ -124,19 +129,35 @@ def userSettingsHandler(request):
             return web.HTTPBadRequest( text = 'Login expired' )
         if 'callsign' in pl:
             callsign = pl['callsign']
-    if callsign:
-        yield from db.paramUpdate( 'users', { 'callsign': callsign }, \
-            { 'settings': json.dumps( data['settings'] ) } )
-        with open( getStationPath( callsign ) + '/settings.json', 'w' ) as f:
-            json.dump( data['settings'], f, ensure_ascii = False )
-        return web.Response( text = 'OK' )
-    else:
-        return web.HTTPBadRequest( text = 'Not logged in' )
+    return callsign if callsign else web.HTTPBadRequest( text = 'Not logged in' )
+
+
+@asyncio.coroutine
+def newsHandler(request):
+    data = yield from request.json()
+    callsign = decodeToken( data )
+    if not isinstance( callsign, str ):
+        return callsign
+    newsPath = getStationPath( callsign ) + '/news.json'
+    news = loadJSON( newsPath )
+    if not news:
+        news = []
+    if 'add' in data:
+        news.insert( 0, { 'ts': time.time(), 'text': data['add'],\
+            'time': datetime.now().strftime( '%d %b %H:%M' ).lower() } )
+    if 'clear' in data:
+        news = []
+    with open( newsPath, 'w' ) as f:
+        json.dump( news, f, ensure_ascii = False )
+    return web.Response( text = 'OK' )
+
+
 
 if __name__ == '__main__':
     app = web.Application()
     app.router.add_post('/aiohttp/login', loginHandler)
     app.router.add_post('/aiohttp/userSettings', userSettingsHandler)
+    app.router.add_post('/aiohttp/news', newsHandler)
     db.verbose = True
     asyncio.async( db.connect() )
 
