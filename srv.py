@@ -151,13 +151,30 @@ def newsHandler(request):
         json.dump( news, f, ensure_ascii = False )
     return web.Response( text = 'OK' )
 
+@asyncio.coroutine
+def trackHandler(request):
+    data = yield from request.json()
+    callsign = decodeToken( data )
+    if not isinstance( callsign, str ):
+        return callsign
+    stationPath = getStationPath( callsign )
+    trackJsonPath = stationPath + '/track.json'
+    if 'file' in data:
+        with open( stationPath + '/track.xml', 'wb' ) as f:
+            f.write( base64.b64decode( data['file'].split( ',' )[1] ) )
+        with open( trackJsonPath, 'w' ) as fj:
+            json.dump( { 'version': time.time() }, fj )
+    if 'clear' in data:
+        os.remove( trackJsonPath )
+    return web.Response( text = 'OK' )
 
 
 if __name__ == '__main__':
-    app = web.Application()
+    app = web.Application( client_max_size = 10 * 1024 ** 2 )
     app.router.add_post('/aiohttp/login', loginHandler)
     app.router.add_post('/aiohttp/userSettings', userSettingsHandler)
     app.router.add_post('/aiohttp/news', newsHandler)
+    app.router.add_post('/aiohttp/track', trackHandler)
     db.verbose = True
     asyncio.async( db.connect() )
 
