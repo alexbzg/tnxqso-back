@@ -168,13 +168,42 @@ def trackHandler(request):
         os.remove( trackJsonPath )
     return web.Response( text = 'OK' )
 
-
+@asyncio.coroutine
+def chatHandler(request):
+    data = yield from request.json()
+    stationData = getUserData( data['station'] )
+    chatAdmins = stationData['chatAdmins'] + ( data['station'] )
+    admin = False
+    if data['from'] in chatAdmins or 'clear' in data or 'delete' in data:
+        callsign = decodeToken( data )
+        if not isinstance( callsign, str ):
+            return callsign
+        if not callsign in chatAdmins:
+            return web.HTTPUnauthorized( \
+                text = 'You must be logged in as chat admin to post with this callsign' )
+        admin = True    
+    chatPath = getStationPath( data['station'] ) + '/chat.json'
+    chat = []
+    if not 'clear' in data:
+        chat = loadJSON( chatPath )
+        if not chat:
+            chat = []
+        if 'delete' in data:
+            chat = [ x for x in chat if x['ts'] != data['ts'] ]
+        else:
+            chat.insert( 0, { 'user': data['from'], 'text': data['text'], \
+                    'admin': admin, 'ts': time.time() } )
+    with open( chatPath, 'w' ) as f:
+        json.dump( chat, f, ensure_ascii = False )
+    return web.Response( text = 'OK' )
+ 
 if __name__ == '__main__':
     app = web.Application( client_max_size = 10 * 1024 ** 2 )
     app.router.add_post('/aiohttp/login', loginHandler)
     app.router.add_post('/aiohttp/userSettings', userSettingsHandler)
     app.router.add_post('/aiohttp/news', newsHandler)
     app.router.add_post('/aiohttp/track', trackHandler)
+    app.router.add_post('/aiohttp/chat', chatHandler)
     db.verbose = True
     asyncio.async( db.connect() )
 
