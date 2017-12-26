@@ -33,7 +33,8 @@ if not defUserSettings:
     defUserSettings = {}
 
 jsonTemplates = { 'settings': defUserSettings, \
-    'log': {}, 'chat': {}, 'news': {}, 'cluster': {}, 'status': {} }
+    'log': {}, 'chat': {}, 'news': {}, 'cluster': {}, 'status': {}, \
+    'chatUsers': {} }
 
 
 
@@ -82,15 +83,6 @@ def loginHandler(request):
                         { 'callsign': data['login'], \
                         'password': data['password'], \
                         'settings': json.dumps( defUserSettings ) }, True )                    
-                    if userData:
-                        callsign = data['login']
-                        stationPath = getStationPath( callsign )
-                        if not os.path.exists( stationPath ):
-                            os.makedirs( stationPath )
-                        for k, v in jsonTemplates.items():
-                            with open( stationPath + '/' + k + '.json', 'w' ) as f:
-                                json.dump( v, f, ensure_ascii = False )
-
         else:
             if not userData:
                 error = 'This callsign is not registerd yet.'
@@ -114,10 +106,33 @@ def userSettingsHandler(request):
     callsign = decodeToken( data )
     if not isinstance( callsign, str ):
         return callsign
+    oldData = yield from getUserData( callsign )
+    oldCs = oldData['settings']['station']['callsign'] 
+    stationPath = getStationPath( oldCs ) if oldCs else None
+    if oldCs != data['settings']['station']['callsign']:
+        newCs = data['settings']['station']['callsign'] 
+        newPath = getStationPath( newCs ) if newCs else None
+        if newCs:
+            if os.path.exists( newPath ):
+                return web.HTTPBadRequest( \
+                    text = 'Station callsign ' + newCS + 'is already registered' )
+            if oldCs:
+                if os.path.exists( stationPath ):
+                    os.rename( stationPath, newPath )
+                else:
+                    os.makedirs( newPath )
+                    for k, v in jsonTemplates.items():
+                        with open( newPath + '/' + k + '.json', 'w' ) as f:
+                            json.dump( v, f, ensure_ascii = False )
+        else:
+            if stationPath and os.file.exists( stationPath ):
+                os.remove( stationPath )
+        stationPath = newPath
     yield from db.paramUpdate( 'users', { 'callsign': callsign }, \
         { 'settings': json.dumps( data['settings'] ) } )
-    with open( getStationPath( callsign ) + '/settings.json', 'w' ) as f:
-        json.dump( data['settings'], f, ensure_ascii = False )
+    if stationPath:
+        with open( getStationPath( callsign ) + '/settings.json', 'w' ) as f:
+            json.dump( data['settings'], f, ensure_ascii = False )
     return web.Response( text = 'OK' )
 
 def decodeToken( data ):
@@ -171,8 +186,9 @@ def trackHandler(request):
 @asyncio.coroutine
 def chatHandler(request):
     data = yield from request.json()
-    stationData = getUserData( data['station'] )
-    chatAdmins = stationData['chatAdmins'] + ( data['station'] )
+    stationCS = data['station'].upper()
+    stationData = yield from getUserData( stationCS )
+    chatAdmins = stationData['settings']['chatAdmins'] + [ stationCS, ]
     admin = False
     if data['from'] in chatAdmins or 'clear' in data or 'delete' in data:
         callsign = decodeToken( data )
