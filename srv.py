@@ -36,7 +36,8 @@ jsonTemplates = { 'settings': defUserSettings, \
     'log': {}, 'chat': {}, 'news': {}, 'cluster': {}, 'status': {}, \
     'chatUsers': {} }
 
-
+def dtFmt( dt ):
+    return dt.strftime( '%d %b' ).lower(), dt.strftime( '%H:%Mz' )
 
 @asyncio.coroutine
 def checkRecaptcha( response ):
@@ -107,7 +108,7 @@ def userSettingsHandler(request):
     if not isinstance( callsign, str ):
         return callsign
     oldData = yield from getUserData( callsign )
-    oldCs = oldData['settings']['station']['callsign'] 
+    oldCs = oldData['settings']['station']['callsign']
     stationPath = getStationPath( oldCs ) if oldCs else None
     if oldCs != data['settings']['station']['callsign']:
         newCs = data['settings']['station']['callsign'] 
@@ -115,7 +116,7 @@ def userSettingsHandler(request):
         if newCs:
             if os.path.exists( newPath ):
                 return web.HTTPBadRequest( \
-                    text = 'Station callsign ' + newCS + 'is already registered' )
+                    text = 'Station callsign ' + newCS.upper() + 'is already registered' )
             if oldCs:
                 if os.path.exists( stationPath ):
                     os.rename( stationPath, newPath )
@@ -131,7 +132,8 @@ def userSettingsHandler(request):
     yield from db.paramUpdate( 'users', { 'callsign': callsign }, \
         { 'settings': json.dumps( data['settings'] ) } )
     if stationPath:
-        with open( getStationPath( callsign ) + '/settings.json', 'w' ) as f:
+        data['settings']['admin'] = callsign
+        with open( stationPath + '/settings.json', 'w' ) as f:
             json.dump( data['settings'], f, ensure_ascii = False )
     return web.Response( text = 'OK' )
 
@@ -207,8 +209,10 @@ def chatHandler(request):
         if 'delete' in data:
             chat = [ x for x in chat if x['ts'] != data['ts'] ]
         else:
-            chat.insert( 0, { 'user': data['from'], 'text': data['text'], \
-                    'admin': admin, 'ts': time.time() } )
+            msg = { 'user': data['from'], 'text': data['text'], \
+                    'admin': admin, 'ts': time.time() }
+            msg['date'], msg['time'] = dtFmt( datetime.utcnow() )
+            chat.insert( 0, msg )
     with open( chatPath, 'w' ) as f:
         json.dump( chat, f, ensure_ascii = False )
     return web.Response( text = 'OK' )
