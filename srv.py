@@ -169,6 +169,24 @@ def newsHandler(request):
     return web.Response( text = 'OK' )
 
 @asyncio.coroutine
+def activeUsersHandler(request):
+    data = yield from request.json()
+    stationPath = getStationPath( data['station'] )
+    auPath = stationPath + '/activeUsers.json'
+    stationSettings = loadJSON( stationPath + 'settings.json' )
+    stationAdmins = stationSettings['chatAdmins'] + [ stationSettings['admin'] ]
+    au = loadJSON( au )
+    if not au:
+        au = {}
+    au[data['user']] = { 'tab': data['tab'], 'ts': time.time(), \
+            'admin': data['user'] in stationAdmins, \
+            'typing': data['typing'] }
+    with open( auPath, 'w' ) as f:
+        json.dump( au, f, ensure_ascii = False )
+    return web.Response( text = 'OK' )
+
+
+@asyncio.coroutine
 def trackHandler(request):
     data = yield from request.json()
     callsign = decodeToken( data )
@@ -188,8 +206,8 @@ def trackHandler(request):
 @asyncio.coroutine
 def chatHandler(request):
     data = yield from request.json()
-    stationCS = data['station'].upper()
-    stationData = yield from getUserData( stationCS )
+    stationPath = getStationPath( data['station'] )
+    stationData = loadJSON( stationPath + '/settings.json' )
     chatAdmins = stationData['settings']['chatAdmins'] + [ stationCS, ]
     admin = False
     if data['from'] in chatAdmins or 'clear' in data or 'delete' in data:
@@ -200,7 +218,7 @@ def chatHandler(request):
             return web.HTTPUnauthorized( \
                 text = 'You must be logged in as chat admin to post with this callsign' )
         admin = True    
-    chatPath = getStationPath( data['station'] ) + '/chat.json'
+    chatPath = stationPath + '/chat.json'
     chat = []
     if not 'clear' in data:
         chat = loadJSON( chatPath )
@@ -224,6 +242,7 @@ if __name__ == '__main__':
     app.router.add_post('/aiohttp/news', newsHandler)
     app.router.add_post('/aiohttp/track', trackHandler)
     app.router.add_post('/aiohttp/chat', chatHandler)
+    app.router.add_post('/aiohttp/activeUsers', activeUsersHandler)
     db.verbose = True
     asyncio.async( db.connect() )
 
