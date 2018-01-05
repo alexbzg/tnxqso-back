@@ -207,8 +207,8 @@ def trackHandler(request):
 def chatHandler(request):
     data = yield from request.json()
     stationPath = getStationPath( data['station'] )
-    stationData = loadJSON( stationPath + '/settings.json' )
-    chatAdmins = stationData['settings']['chatAdmins'] + [ stationCS, ]
+    stationSettings = loadJSON( stationPath + '/settings.json' )
+    chatAdmins = stationSettings['chatAdmins'] + [ stationSettings['admin'], ]
     admin = False
     if data['from'] in chatAdmins or 'clear' in data or 'delete' in data:
         callsign = decodeToken( data )
