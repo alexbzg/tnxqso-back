@@ -173,9 +173,9 @@ def activeUsersHandler(request):
     data = yield from request.json()
     stationPath = getStationPath( data['station'] )
     auPath = stationPath + '/activeUsers.json'
-    stationSettings = loadJSON( stationPath + 'settings.json' )
+    stationSettings = loadJSON( stationPath + '/settings.json' )
     stationAdmins = stationSettings['chatAdmins'] + [ stationSettings['admin'] ]
-    au = loadJSON( au )
+    au = loadJSON( auPath )
     if not au:
         au = {}
     au[data['user']] = { 'tab': data['tab'], 'ts': time.time(), \
