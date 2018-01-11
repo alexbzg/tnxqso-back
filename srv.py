@@ -178,7 +178,7 @@ def activeUsersHandler(request):
     au = loadJSON( auPath )
     if not au:
         au = {}
-    au[data['user']] = { 'tab': data['tab'], 'ts': time.time(), \
+    au[data['user']] = { 'chat': data['chat'], 'ts': time.time(), \
             'admin': data['user'] in stationAdmins, \
             'typing': data['typing'] }
     with open( auPath, 'w' ) as f:
