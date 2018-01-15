@@ -62,6 +62,16 @@ def getStationPath( callsign ):
     return webRoot + '/stations/' + callsign.lower().replace( '/', '-' )
 
 @asyncio.coroutine
+def getStationCallsign( adminCS ):
+    data = yield from getUserData( adminCS )
+    return data['station']['callsign']
+
+@asyncio.coroutine
+def getStationPathByAdminCS( adminCS ):
+    stationCS = yield from getStationCS( adminCS )
+    return getStationPath( stationCS )
+
+@asyncio.coroutine
 def loginHandler(request):
     error = None
     data = yield from request.json()
@@ -148,14 +158,14 @@ def decodeToken( data ):
             callsign = pl['callsign']
     return callsign if callsign else web.HTTPBadRequest( text = 'Not logged in' )
 
-
 @asyncio.coroutine
 def newsHandler(request):
     data = yield from request.json()
     callsign = decodeToken( data )
     if not isinstance( callsign, str ):
         return callsign
-    newsPath = getStationPath( callsign ) + '/news.json'
+    stationPath = yield from getStationPathByAdminCS( callsign )
+    newsPath = stationPath + '/news.json'
     news = loadJSON( newsPath )
     if not news:
         news = []
@@ -192,7 +202,7 @@ def trackHandler(request):
     callsign = decodeToken( data )
     if not isinstance( callsign, str ):
         return callsign
-    stationPath = getStationPath( callsign )
+    stationPath = yield from getStationPathByAdminCS( callsign )
     trackJsonPath = stationPath + '/track.json'
     if 'file' in data:
         with open( stationPath + '/track.xml', 'wb' ) as f:
@@ -202,6 +212,26 @@ def trackHandler(request):
     if 'clear' in data:
         os.remove( trackJsonPath )
     return web.Response( text = 'OK' )
+
+@asyncio.coroutine
+def logHandler(request):
+    data = yield from request.json()
+    callsign = decodeToken( data )
+    if not isinstance( callsign, str ):
+        return callsign
+    stationPath = yield from getStationPathByAdminCS( callsign )
+    logPath = stationPath + '/log.json'
+    log = loadJSON( logPath )
+    if 'qso' in data:
+        if not log:
+            log = []
+        log.insert( 0, data['qso'] )
+    if 'clear' in data:
+        log = []
+    with open( logPath, 'w' ) as f:
+        json.dump( log, f )
+    return web.Response( text = 'OK' )
+
 
 @asyncio.coroutine
 def chatHandler(request):
@@ -243,6 +273,7 @@ if __name__ == '__main__':
     app.router.add_post('/aiohttp/track', trackHandler)
     app.router.add_post('/aiohttp/chat', chatHandler)
     app.router.add_post('/aiohttp/activeUsers', activeUsersHandler)
+    app.router.add_post('/aiohttp/log', logHandler)
     db.verbose = True
     asyncio.async( db.connect() )
 
