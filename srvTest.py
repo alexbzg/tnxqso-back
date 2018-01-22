@@ -21,6 +21,7 @@ class TestSrv(unittest.TestCase):
             data = json.dumps( { 'qso': 'blahblahblah', 'token': token } ) )
         self.assertEqual( r.status_code, requests.codes.ok )
         print( r.text )
+        r.connection.close()
 
 if __name__ == '__main__':
     unittest.main()

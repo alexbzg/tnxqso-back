@@ -64,11 +64,11 @@ def getStationPath( callsign ):
 @asyncio.coroutine
 def getStationCallsign( adminCS ):
     data = yield from getUserData( adminCS )
-    return data['station']['callsign']
+    return data['settings']['station']['callsign']
 
 @asyncio.coroutine
 def getStationPathByAdminCS( adminCS ):
-    stationCS = yield from getStationCS( adminCS )
+    stationCS = yield from getStationCallsign( adminCS )
     return getStationPath( stationCS )
 
 @asyncio.coroutine
