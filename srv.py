@@ -82,7 +82,7 @@ def loginHandler(request):
         error = 'Minimal password length is 6 symbols'
     if not error:
         userData = yield from getUserData( data['login'] )
-        if data['newUser']:
+        if 'newUser' in data and data['newUser']:
             rcTest = yield from checkRecaptcha( data['recaptcha'] )
             if not rcTest:
                 error = 'Recaptcha test failed. Please try again'
@@ -95,10 +95,8 @@ def loginHandler(request):
                         'password': data['password'], \
                         'settings': json.dumps( defUserSettings ) }, True )                    
         else:
-            if not userData:
-                error = 'This callsign is not registerd yet.'
-            elif userData['password'] != data['password']:
-                error = 'Wrong password.'            
+            if not userData or userData['password'] != data['password']:
+                error = 'Wrong callsign or password.'            
     if error:
         return web.HTTPBadRequest( text = error )
     else:
@@ -157,6 +155,53 @@ def decodeToken( data ):
         if 'callsign' in pl:
             callsign = pl['callsign']
     return callsign if callsign else web.HTTPBadRequest( text = 'Not logged in' )
+
+def sind( d ):
+    return math.sin( math.radians(d) )
+
+def cosd( d ):
+    return math.cos( math.radians(d) )
+
+@asyncio.coroutine
+def locationHandler( request ):
+    newData = yield from request.json()
+    callsign = decodeToken( newData )
+    if not isinstance( callsign, str ):
+        return callsign
+    stationPath = yield from getStationPathByAdminCS( callsign )
+    fp = stationPath + '/status.json'
+    data = loadJSON( fp )
+    if not data:
+        data = {}
+    if not 'locTs' in data and 'ts' in data:
+        data['locTs'] = data['ts']
+    data['ts'] = int( datetime.now().strftime("%s") ) 
+    data['date'], data['time'] = dtFmt( datetime.utcnow() )    
+    data['loc'] = newData['loc']
+    data['rafa'] = newData['rafa']
+    data['rda'] = newData['rda']
+    if newData['location']:
+        if 'location' in data and data['location']:
+            data['prev'] = { 'location': data['location'][:], \
+                    'ts': data['locTs'] }
+        data['locTs'] = data['ts']
+        data['location'] = newData['location']
+        if 'prev' in data:
+            lat = [data['location'][1], data['prev']['location'][1]]
+            lon = [data['location'][0], data['prev']['location'][0]]
+            dlon = lon[0] - lon[1] 
+            dlat = lat[0] - lat[1] 
+            a = (sind(dlat/2))**2 + cosd(lat[0]) * cosd(lat[1]) * (sind(dlon/2)) \
+                    ** 2
+            c = 2 * math.atan2( math.sqrt(a), math.sqrt(1-a) ) 
+            d = c * 6373            
+            data['d'] = d
+            data['dt'] = data['locTs'] - data['prev']['ts']
+            data['speed'] = d / ( float( data['locTs'] - data['prev']['ts'] ) \
+                    / 3600 )
+    with open( fp, 'w' ) as f:
+        json.dump( data, f, ensure_ascii = False )
+    return web.Response( text = 'OK' )
 
 @asyncio.coroutine
 def newsHandler(request):
@@ -274,6 +319,7 @@ if __name__ == '__main__':
     app.router.add_post('/aiohttp/chat', chatHandler)
     app.router.add_post('/aiohttp/activeUsers', activeUsersHandler)
     app.router.add_post('/aiohttp/log', logHandler)
+    app.router.add_post('/aiohttp/location', locationHandler)
     db.verbose = True
     asyncio.async( db.connect() )
 
