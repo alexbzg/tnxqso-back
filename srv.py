@@ -2,7 +2,7 @@
 #coding=utf-8
 
 import argparse, asyncio, logging, logging.handlers, aiohttp, jwt, os, base64, \
-        json, time
+        json, time, math
 from datetime import datetime
 from aiohttp import web
 from common import siteConf, loadJSON, appRoot, startLogging
@@ -176,7 +176,9 @@ def locationHandler( request ):
     if not 'locTs' in data and 'ts' in data:
         data['locTs'] = data['ts']
     data['ts'] = int( datetime.now().strftime("%s") ) 
-    data['date'], data['time'] = dtFmt( datetime.utcnow() )    
+    dtUTC = datetime.utcnow()
+    data['date'], data['time'] = dtFmt( dtUTC )    
+    data['year'] = dtUTC.year
     data['loc'] = newData['loc']
     data['rafa'] = newData['rafa']
     data['rda'] = newData['rda']
@@ -219,6 +221,8 @@ def newsHandler(request):
             'time': datetime.now().strftime( '%d %b %H:%M' ).lower() } )
     if 'clear' in data:
         news = []
+    if 'delete' in data:
+        news = [x for x in news if x['ts'] != data['delete']]
     with open( newsPath, 'w' ) as f:
         json.dump( news, f, ensure_ascii = False )
     return web.Response( text = 'OK' )
@@ -231,9 +235,12 @@ def activeUsersHandler(request):
     stationSettings = loadJSON( stationPath + '/settings.json' )
     stationAdmins = stationSettings['chatAdmins'] + [ stationSettings['admin'] ]
     au = loadJSON( auPath )
+    nowTs = time.time()
     if not au:
         au = {}
-    au[data['user']] = { 'chat': data['chat'], 'ts': time.time(), \
+    au = { k : v for k, v in au.items() \
+            if nowTs - v['ts'] > 120 }
+    au[data['user']] = { 'chat': data['chat'], 'ts': nowTs, \
             'admin': data['user'] in stationAdmins, \
             'typing': data['typing'] }
     with open( auPath, 'w' ) as f:
@@ -270,7 +277,15 @@ def logHandler(request):
     if 'qso' in data:
         if not log:
             log = []
-        log.insert( 0, data['qso'] )
+        qso = data['qso']
+        dt = datetime.strptime( qso['ts'], "%Y-%m-%d %H:%M:%S" )
+        if qso['rda']:
+            qso['rda'] = qso['rda'].upper()
+        if qso['wff']:
+            qso['wff'] = qso['wff'].upper()
+        qso['date'], qso['time'] = dtFmt( dt )
+        qso['ts'] = time.time()
+        log.insert( 0, qso )
     if 'clear' in data:
         log = []
     with open( logPath, 'w' ) as f:
@@ -285,13 +300,14 @@ def chatHandler(request):
     stationSettings = loadJSON( stationPath + '/settings.json' )
     chatAdmins = stationSettings['chatAdmins'] + [ stationSettings['admin'], ]
     admin = False
-    if data['from'] in chatAdmins or 'clear' in data or 'delete' in data:
+    if ( 'from' in data and data['from'] in chatAdmins ) \
+        or 'clear' in data or 'delete' in data:
         callsign = decodeToken( data )
         if not isinstance( callsign, str ):
             return callsign
         if not callsign in chatAdmins:
             return web.HTTPUnauthorized( \
-                text = 'You must be logged in as chat admin to post with this callsign' )
+                text = 'You must be logged in as chat admin' )
         admin = True    
     chatPath = stationPath + '/chat.json'
     chat = []
@@ -300,7 +316,7 @@ def chatHandler(request):
         if not chat:
             chat = []
         if 'delete' in data:
-            chat = [ x for x in chat if x['ts'] != data['ts'] ]
+            chat = [ x for x in chat if x['ts'] != data['delete'] ]
         else:
             msg = { 'user': data['from'], 'text': data['text'], \
                     'admin': admin, 'ts': time.time() }
