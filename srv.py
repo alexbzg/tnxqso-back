@@ -124,15 +124,13 @@ def userSettingsHandler(request):
         if newCs:
             if os.path.exists( newPath ):
                 return web.HTTPBadRequest( \
-                    text = 'Station callsign ' + newCS.upper() + 'is already registered' )
+                    text = 'Station callsign ' + newCS.upper() + \
+                        'is already registered' )
             if oldCs:
                 if os.path.exists( stationPath ):
                     os.rename( stationPath, newPath )
                 else:
-                    os.makedirs( newPath )
-                    for k, v in jsonTemplates.items():
-                        with open( newPath + '/' + k + '.json', 'w' ) as f:
-                            json.dump( v, f, ensure_ascii = False )
+                    createStationDir( newPath )
         else:
             if stationPath and os.file.exists( stationPath ):
                 os.remove( stationPath )
@@ -140,10 +138,19 @@ def userSettingsHandler(request):
     yield from db.paramUpdate( 'users', { 'callsign': callsign }, \
         { 'settings': json.dumps( data['settings'] ) } )
     if stationPath:
+        if not os.path.exists( stationPath ):
+            createStationDir( stationPath )
         data['settings']['admin'] = callsign
         with open( stationPath + '/settings.json', 'w' ) as f:
             json.dump( data['settings'], f, ensure_ascii = False )
     return web.Response( text = 'OK' )
+
+def createStationDir( path ):
+    os.makedirs( path )
+    for k, v in jsonTemplates.items():
+        with open( path + '/' + k + '.json', 'w' ) as f:
+            json.dump( v, f, ensure_ascii = False )
+
 
 def decodeToken( data ):
     callsign = None
