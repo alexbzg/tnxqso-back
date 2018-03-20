@@ -3,7 +3,7 @@ Description=tnxqso backend server
 After=network.target postgresql@9.4-main.service 
 
 [Service]
-ExecStart=/usr/local/tnxqso/srv.py --path=/tmp/tnxqso.socket
+ExecStart=/usr/local/tnxqso/srv.py --test
 Restart=always
 User=www-data
 Group=www-data

@@ -39,11 +39,10 @@ def initConnection( cn ):
 
 class DBConn:
 
-    def __init__( self ):
-        conf = siteConf()
+    def __init__( self, dbParams ):
         self.dsn = ' '.join( 
                 [ k + "='" + v + "'" 
-                    for k, v in conf.items( 'db' ) ] )
+                    for k, v in dbParams ] )
         self.verbose = False
 
 
@@ -161,6 +160,5 @@ class DBConn:
         sql = "delete from " + table + " where id = %s" 
         yield from self.execute( sql, ( id, ) )
 
-db = DBConn()
 
 

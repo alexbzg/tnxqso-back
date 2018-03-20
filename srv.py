@@ -6,17 +6,19 @@ import argparse, asyncio, logging, logging.handlers, aiohttp, jwt, os, base64, \
 from datetime import datetime
 from aiohttp import web
 from common import siteConf, loadJSON, appRoot, startLogging
-from tqdb import db, spliceParams
+from tqdb import DBConn, spliceParams
 
 parser = argparse.ArgumentParser(description="tnxqso backend aiohttp server")
-parser.add_argument('--path')
-parser.add_argument('--port')
+parser.add_argument('--test', action = "store_true" )
+args = parser.parse_args()
 
 conf = siteConf()
-webRoot = conf.get( 'web', 'root' )
+webRoot = conf.get( 'web', 'root_test' if args.test else 'root' )
 
-startLogging( 'srv' )
+startLogging( 'srv_test' if args.test else 'srv' )
 logging.debug( "restart" )
+
+db = DBConn( conf.items( 'db_test' if args.test else 'db' ) )
 
 secret = None
 fpSecret = conf.get( 'files', 'secret' )
@@ -347,4 +349,4 @@ if __name__ == '__main__':
     asyncio.async( db.connect() )
 
     args = parser.parse_args()
-    web.run_app(app, path=args.path, port=args.port)
+    web.run_app(app, path = conf.get( 'sockets', 'srv_test' if args.test else 'srv' ) )
