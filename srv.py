@@ -19,6 +19,7 @@ startLogging( 'srv_test' if args.test else 'srv' )
 logging.debug( "restart" )
 
 db = DBConn( conf.items( 'db_test' if args.test else 'db' ) )
+db.connect()
 
 secret = None
 fpSecret = conf.get( 'files', 'secret' )

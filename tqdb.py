@@ -91,7 +91,7 @@ class DBConn:
     @asyncio.coroutine
     def execute( self, sql, params = None ):
         res = False
-        with (yield from db.pool.cursor()) as cur:
+        with (yield from self.pool.cursor()) as cur:
             try:
                 if self.verbose:
                     logging.debug( sql )
