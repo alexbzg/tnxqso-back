@@ -31,7 +31,7 @@ if not secret:
     with open( fpSecret, 'wb' ) as fSecret:
         fSecret.write( str( secret ) )
 
-defUserSettings = loadJSON( appRoot + '/defaultUserSettings.json' )
+defUserSettings = loadJSON( webRoot + '/js/defaultUserSettings.json' )
 if not defUserSettings:
     defUserSettings = {}
 
@@ -119,9 +119,13 @@ def userSettingsHandler(request):
     if not isinstance( callsign, str ):
         return callsign
     oldData = yield from getUserData( callsign )
-    oldCs = oldData['settings']['station']['callsign']
+    cs = oldData['settings']['station']['callsign']
     stationPath = getStationPath( oldCs ) if oldCs else None
-    if oldCs != data['settings']['station']['callsign']:
+    publishPath = webRoot + '/static/js/publish.json'
+    publish = loadJSON( publishPath )
+    if not publish:
+        publish = {}
+    if cs != data['settings']['station']['callsign']:
         newCs = data['settings']['station']['callsign'] 
         newPath = getStationPath( newCs ) if newCs else None
         if newCs:
@@ -129,15 +133,26 @@ def userSettingsHandler(request):
                 return web.HTTPBadRequest( \
                     text = 'Station callsign ' + newCS.upper() + \
                         'is already registered' )
-            if oldCs:
+            if cs:
                 if os.path.exists( stationPath ):
                     os.rename( stationPath, newPath )
                 else:
                     createStationDir( newPath )
+                if oldCs in publish:
+                    if newCs:
+                        publish[newCs] = publish[cs]
+                    del publish[cs]
+            cs = newCs
         else:
             if stationPath and os.file.exists( stationPath ):
                 os.remove( stationPath )
         stationPath = newPath
+    if cs:
+        if not cs in publish:
+            publish[cs] = {}
+        publish[cs]['user'] = data['settings']['publish']
+    with open( publishPath, 'w' ) as f:
+        json.dump( publish, f, ensure_ascii = False )
     yield from db.paramUpdate( 'users', { 'callsign': callsign }, \
         { 'settings': json.dumps( data['settings'] ) } )
     if stationPath:
