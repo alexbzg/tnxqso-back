@@ -29,7 +29,7 @@ def spliceParams( data, params ):
     return { param: json.dumps( data[param] ) \
             if isinstance( data[param],dict ) else data[param] \
         for param in params \
-        if data.has_key( param ) }
+        if param in data }
 
 @asyncio.coroutine
 def initConnection( cn ):
