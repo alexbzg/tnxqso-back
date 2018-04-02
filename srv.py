@@ -2,11 +2,15 @@
 #coding=utf-8
 
 import argparse, asyncio, logging, logging.handlers, aiohttp, jwt, os, base64, \
-        json, time, math
+        json, time, math, smtplib
 from datetime import datetime
 from aiohttp import web
 from common import siteConf, loadJSON, appRoot, startLogging
 from tqdb import DBConn, spliceParams
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from email.mime.application import MIMEApplication
+
 
 parser = argparse.ArgumentParser(description="tnxqso backend aiohttp server")
 parser.add_argument('--test', action = "store_true" )
@@ -14,6 +18,8 @@ args = parser.parse_args()
 
 conf = siteConf()
 webRoot = conf.get( 'web', 'root_test' if args.test else 'root' )
+webAddress = conf.get( 'web', 'address_test' if args.test else 'address' )
+siteAdmins = conf.get( 'web', 'admins' ).split( ' ' )
 
 startLogging( 'srv_test' if args.test else 'srv' )
 logging.debug( "restart" )
@@ -75,6 +81,63 @@ def getStationPathByAdminCS( adminCS ):
     return getStationPath( stationCS )
 
 @asyncio.coroutine
+def passwordRecoveryRequestHandler(request):
+    error = None
+    data = yield from request.json()
+    userData = False
+    if not 'login' in data or len( data['login'] ) < 2:
+        error = 'Minimal login length is 2 symbols'
+    if not error:
+        data['login'] = data['login'].lower()
+        rcTest = yield from checkRecaptcha( data['recaptcha'] )
+        userData = yield from getUserData( data['login'] )
+        if not rcTest:
+            error = 'Recaptcha test failed. Please try again'
+        else:
+            if not userData:
+                error = 'This callsign is not registered.'
+            else:
+                if not userData['email']:
+                    error = 'This account has no email address.'
+                else:
+                    token = jwt.encode( 
+                        { 'callsign': data['login'], 'time': time.time() }, \
+                        secret, algorithm='HS256' ).decode('utf-8')
+                    text = 'Click on this link to recover your tnxqso.com ' + \
+                             'password:' + webAddress + \
+                             '/#/changePassword?token=' + token + """
+If you did not request password recovery just ignore this message. 
+The link above will be valid for 1 hour.
+
+tnxqso.com support"""
+                    sendEmail( text = text, fr = conf.get( 'email', 'address' ), \
+                        to = userData['email'], \
+                        subject = "tnxqso.com password recovery" )
+                    return web.Response( text = 'OK' )
+    return web.HTTPBadRequest( text = error )
+
+def sendEmail( **email ):
+    myAddress = conf.get( 'email', 'address' )
+    msg = MIMEMultipart()
+    msg.attach(  MIMEText( email['text'].encode( 'utf-8' ), 'plain', 'UTF-8' ) )
+    msg['from'] = email['fr']
+    msg['to'] = email['to']
+    msg['MIME-Version'] = "1.0"
+    msg['Subject'] = email['subject']
+    msg['Content-Type'] = "text/plain; charset=utf-8"
+    msg['Content-Transfer-Encoding'] = "quoted-printable"
+
+    if 'attachments' in email and email['attachments']:
+        for item in email['attachments']:
+            part = MIMEApplication( item['data'],
+                        Name = item['name'] )
+            part['Content-Disposition'] = 'attachment; filename="%s"' % item['name']
+            msg.attach(part)
+    server = smtplib.SMTP_SSL( conf.get( 'email', 'smtp' ) )
+    server.login( myAddress, conf.get( 'email', 'password' ) )
+    server.sendmail( myAddress, msg['to'], str( msg ) )
+
+@asyncio.coroutine
 def loginHandler(request):
     error = None
     data = yield from request.json()
@@ -84,6 +147,7 @@ def loginHandler(request):
     if not 'password' in data or len( data['password'] ) < 6:
         error = 'Minimal password length is 6 symbols'
     if not error:
+        data['login'] = data['login'].lower()
         userData = yield from getUserData( data['login'] )
         if 'newUser' in data and data['newUser']:
             rcTest = yield from checkRecaptcha( data['recaptcha'] )
@@ -106,7 +170,30 @@ def loginHandler(request):
         userData['token'] = jwt.encode( { 'callsign': data['login'] }, \
                 secret, algorithm='HS256' ).decode('utf-8') 
         del userData['password']
+        if data['login'] in siteAdmins:
+            userData['siteAdmin'] = True
         return web.json_response( userData )
+
+@asyncio.coroutine
+def publishHandler(request):
+    data = yield from request.json()
+    callsign = decodeToken( data )
+    if not isinstance( callsign, str ):
+        return callsign
+    if not callsign in siteAdmins:
+        return web.HTTPUnauthorized( \
+            text = 'You must be logged in as site admin' )
+    publishPath = webRoot + '/js/publish.json'
+    publish = loadJSON( publishPath )
+    if not publish:
+        publish = {}
+    if not data['station'] in publish:
+        publish[data['station']] = {}
+    publish[data['station']]['admin'] = data['publish']
+    with open( publishPath, 'w' ) as f:
+        json.dump( publish, f, ensure_ascii = False )
+    return web.Response( text = 'OK' )
+
 
 @asyncio.coroutine
 def userSettingsHandler(request):
@@ -118,49 +205,53 @@ def userSettingsHandler(request):
     callsign = decodeToken( data )
     if not isinstance( callsign, str ):
         return callsign
-    oldData = yield from getUserData( callsign )
-    cs = oldData['settings']['station']['callsign']
-    stationPath = getStationPath( oldCs ) if oldCs else None
-    publishPath = webRoot + '/static/js/publish.json'
-    publish = loadJSON( publishPath )
-    if not publish:
-        publish = {}
-    if cs != data['settings']['station']['callsign']:
-        newCs = data['settings']['station']['callsign'] 
-        newPath = getStationPath( newCs ) if newCs else None
-        if newCs:
-            if os.path.exists( newPath ):
-                return web.HTTPBadRequest( \
-                    text = 'Station callsign ' + newCS.upper() + \
-                        'is already registered' )
-            if cs:
-                if os.path.exists( stationPath ):
-                    os.rename( stationPath, newPath )
-                else:
-                    createStationDir( newPath )
-                if oldCs in publish:
-                    if newCs:
-                        publish[newCs] = publish[cs]
-                    del publish[cs]
-            cs = newCs
-        else:
-            if stationPath and os.file.exists( stationPath ):
-                os.remove( stationPath )
-        stationPath = newPath
-    if cs:
-        if not cs in publish:
-            publish[cs] = {}
-        publish[cs]['user'] = data['settings']['publish']
-    with open( publishPath, 'w' ) as f:
-        json.dump( publish, f, ensure_ascii = False )
-    yield from db.paramUpdate( 'users', { 'callsign': callsign }, \
-        { 'settings': json.dumps( data['settings'] ) } )
-    if stationPath:
-        if not os.path.exists( stationPath ):
-            createStationDir( stationPath )
-        data['settings']['admin'] = callsign
-        with open( stationPath + '/settings.json', 'w' ) as f:
-            json.dump( data['settings'], f, ensure_ascii = False )
+    if 'settings' in data:
+        oldData = yield from getUserData( callsign )
+        cs = oldData['settings']['station']['callsign']
+        stationPath = getStationPath( cs ) if cs else None
+        publishPath = webRoot + '/js/publish.json'
+        publish = loadJSON( publishPath )
+        if not publish:
+            publish = {}
+        if cs != data['settings']['station']['callsign']:
+            newCs = data['settings']['station']['callsign'] 
+            newPath = getStationPath( newCs ) if newCs else None
+            if newCs:
+                if os.path.exists( newPath ):
+                    return web.HTTPBadRequest( \
+                        text = 'Station callsign ' + newCS.upper() + \
+                            'is already registered' )
+                if cs:
+                    if os.path.exists( stationPath ):
+                        os.rename( stationPath, newPath )
+                    else:
+                        createStationDir( newPath )
+                    if oldCs in publish:
+                        if newCs:
+                            publish[newCs] = publish[cs]
+                        del publish[cs]
+                cs = newCs
+            else:
+                if stationPath and os.file.exists( stationPath ):
+                    os.remove( stationPath )
+            stationPath = newPath
+        if cs:
+            if not cs in publish:
+                publish[cs] = {}
+            publish[cs]['user'] = data['settings']['publish']
+        with open( publishPath, 'w' ) as f:
+            json.dump( publish, f, ensure_ascii = False )
+        yield from db.paramUpdate( 'users', { 'callsign': callsign }, \
+            { 'settings': json.dumps( data['settings'] ) } )
+        if stationPath:
+            if not os.path.exists( stationPath ):
+                createStationDir( stationPath )
+            data['settings']['admin'] = callsign
+            with open( stationPath + '/settings.json', 'w' ) as f:
+                json.dump( data['settings'], f, ensure_ascii = False )
+    else:
+        yield from db.paramUpdate( 'users', { 'callsign': callsign }, \
+            spliceParams( data, ( 'email', 'password' ) ) )
     return web.Response( text = 'OK' )
 
 def createStationDir( path ):
@@ -178,7 +269,9 @@ def decodeToken( data ):
         except jwt.exceptions.DecodeError as e:
             return web.HTTPBadRequest( text = 'Login expired' )
         if 'callsign' in pl:
-            callsign = pl['callsign']
+            callsign = pl['callsign'].lower()
+        if 'time' in pl and time.time() - pl['time'] > 60 * 60:
+            return web.HTTPBadRequest( text = 'Password change link is expired' )
     return callsign if callsign else web.HTTPBadRequest( text = 'Not logged in' )
 
 def sind( d ):
@@ -236,7 +329,11 @@ def newsHandler(request):
     callsign = decodeToken( data )
     if not isinstance( callsign, str ):
         return callsign
-    stationPath = yield from getStationPathByAdminCS( callsign )
+    stationPath = getStationPath( data['station'] )
+    stationSettings = loadJSON( stationPath + '/settings.json' )
+    if callsign != stationSettings['admin'] and not callsign in siteAdmins:
+        return web.HTTPUnauthorized( \
+            text = 'You must be logged in as station admin' )
     newsPath = stationPath + '/news.json'
     news = loadJSON( newsPath )
     if not news:
@@ -330,7 +427,7 @@ def chatHandler(request):
         callsign = decodeToken( data )
         if not isinstance( callsign, str ):
             return callsign
-        if not callsign in chatAdmins:
+        if not callsign in chatAdmins and not callsign in siteAdmins:
             return web.HTTPUnauthorized( \
                 text = 'You must be logged in as chat admin' )
         admin = True    
@@ -361,6 +458,8 @@ if __name__ == '__main__':
     app.router.add_post('/aiohttp/activeUsers', activeUsersHandler)
     app.router.add_post('/aiohttp/log', logHandler)
     app.router.add_post('/aiohttp/location', locationHandler)
+    app.router.add_post('/aiohttp/publish', publishHandler)
+    app.router.add_post('/aiohttp/passwordRecoveryRequest', passwordRecoveryRequestHandler )
     db.verbose = True
     asyncio.async( db.connect() )
 
