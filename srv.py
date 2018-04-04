@@ -116,6 +116,33 @@ tnxqso.com support"""
                     return web.Response( text = 'OK' )
     return web.HTTPBadRequest( text = error )
 
+@asyncio.coroutine
+def contactHandler(request):
+    error = None
+    userEmail = None
+    data = yield from request.json()
+    userData = False
+    if 'token' in data:
+        callsign = decodeToken( data )
+        if not isinstance( callsign, str ):
+            return callsign
+        userData = yield from getUserData( callsign )
+        userEmail = userData['email']
+    else:
+        rcTest = yield from checkRecaptcha( data['recaptcha'] )
+        if not rcTest:
+            error = 'Recaptcha test failed. Please try again'
+        else:
+            userEmail = data['email']
+    if not error:
+        sendEmail( text = data['text'], fr = userEmail, \
+            to = conf.get( 'email', 'address' ), \
+            subject = "tnxqso.com contact message" )
+        return web.Response( text = 'OK' )
+    return web.HTTPBadRequest( text = error )
+
+
+
 def sendEmail( **email ):
     myAddress = conf.get( 'email', 'address' )
     msg = MIMEMultipart()
@@ -460,6 +487,7 @@ if __name__ == '__main__':
     app.router.add_post('/aiohttp/location', locationHandler)
     app.router.add_post('/aiohttp/publish', publishHandler)
     app.router.add_post('/aiohttp/passwordRecoveryRequest', passwordRecoveryRequestHandler )
+    app.router.add_post('/aiohttp/contact', contactHandler )
     db.verbose = True
     asyncio.async( db.connect() )
 
