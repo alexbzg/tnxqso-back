@@ -187,7 +187,7 @@ def loginHandler(request):
                     userData = yield from db.getObject( 'users', \
                         { 'callsign': data['login'], \
                         'password': data['password'], \
-                        'settings': json.dumps( defUserSettings ) }, True )                    
+                        'settings': json.dumps( defUserSettings ) }, True )
         else:
             if not userData or userData['password'] != data['password']:
                 error = 'Wrong callsign or password.'            
@@ -200,6 +200,18 @@ def loginHandler(request):
         if data['login'] in siteAdmins:
             userData['siteAdmin'] = True
         return web.json_response( userData )
+
+@asyncio.coroutine
+def userDataHandler(request):
+    data = yield from request.json()
+    callsign = decodeToken( data )
+    if not isinstance( callsign, str ):
+        return callsign
+    userData = yield from getUserData( callsign )
+    del userData['password']
+    if callsign in siteAdmins:
+        userData['siteAdmin'] = True
+    return web.json_response( userData )
 
 @asyncio.coroutine
 def publishHandler(request):
@@ -220,7 +232,6 @@ def publishHandler(request):
     with open( publishPath, 'w' ) as f:
         json.dump( publish, f, ensure_ascii = False )
     return web.Response( text = 'OK' )
-
 
 @asyncio.coroutine
 def userSettingsHandler(request):
@@ -243,25 +254,22 @@ def userSettingsHandler(request):
         if cs != data['settings']['station']['callsign']:
             newCs = data['settings']['station']['callsign'] 
             newPath = getStationPath( newCs ) if newCs else None
+            if stationPath and os.file.exists( stationPath ):
+                os.remove( stationPath )
             if newCs:
                 if os.path.exists( newPath ):
                     return web.HTTPBadRequest( \
                         text = 'Station callsign ' + newCs.upper() + \
                             'is already registered' )
                 if cs:
-                    if os.path.exists( stationPath ):
-                        os.rename( stationPath, newPath )
-                    else:
-                        createStationDir( newPath )
+                    createStationDir( newPath )
                     if cs in publish:
                         if newCs:
                             publish[newCs] = publish[cs]
                         del publish[cs]
                 cs = newCs
             else:
-                if stationPath and os.file.exists( stationPath ):
-                    os.remove( stationPath )
-            stationPath = newPath
+                stationPath = None
         if cs:
             if not cs in publish:
                 publish[cs] = {}
@@ -488,6 +496,7 @@ if __name__ == '__main__':
     app.router.add_post('/aiohttp/publish', publishHandler)
     app.router.add_post('/aiohttp/passwordRecoveryRequest', passwordRecoveryRequestHandler )
     app.router.add_post('/aiohttp/contact', contactHandler )
+    app.router.add_post('/aiohttp/userData', userDataHandler )
     db.verbose = True
     asyncio.async( db.connect() )
 
