@@ -2,7 +2,7 @@
 #coding=utf-8
 
 import argparse, asyncio, logging, logging.handlers, aiohttp, jwt, os, base64, \
-        json, time, math, smtplib
+        json, time, math, smtplib, shutil
 from datetime import datetime
 from aiohttp import web
 from common import siteConf, loadJSON, appRoot, startLogging
@@ -254,20 +254,20 @@ def userSettingsHandler(request):
         if cs != data['settings']['station']['callsign']:
             newCs = data['settings']['station']['callsign'] 
             newPath = getStationPath( newCs ) if newCs else None
-            if stationPath and os.file.exists( stationPath ):
-                os.remove( stationPath )
+            if stationPath and os.path.exists( stationPath ):
+                shutil.rmtree( stationPath )
             if newCs:
                 if os.path.exists( newPath ):
                     return web.HTTPBadRequest( \
                         text = 'Station callsign ' + newCs.upper() + \
                             'is already registered' )
-                if cs:
                     createStationDir( newPath )
-                    if cs in publish:
-                        if newCs:
-                            publish[newCs] = publish[cs]
-                        del publish[cs]
+                if cs and cs in publish:
+                    if newCs:
+                        publish[newCs] = publish[cs]
+                    del publish[cs]
                 cs = newCs
+                stationPath = newPath
             else:
                 stationPath = None
         if cs:
