@@ -187,6 +187,7 @@ def loginHandler(request):
                     userData = yield from db.getObject( 'users', \
                         { 'callsign': data['login'], \
                         'password': data['password'], \
+                        'email': data['email'],
                         'settings': json.dumps( defUserSettings ) }, True )
         else:
             if not userData or userData['password'] != data['password']:
@@ -272,7 +273,7 @@ def userSettingsHandler(request):
                 stationPath = None
         if cs:
             if not cs in publish:
-                publish[cs] = {}
+                publish[cs] = { 'admin': True }
             publish[cs]['user'] = data['settings']['publish']
         with open( publishPath, 'w' ) as f:
             json.dump( publish, f, ensure_ascii = False )
