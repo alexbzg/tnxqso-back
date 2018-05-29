@@ -2,7 +2,7 @@
 #coding=utf-8
 
 import argparse, asyncio, logging, logging.handlers, aiohttp, jwt, os, base64, \
-        json, time, math, smtplib, shutil
+        json, time, math, smtplib, shutil, io, zipfile
 from datetime import datetime
 from aiohttp import web
 from common import siteConf, loadJSON, appRoot, startLogging
@@ -414,11 +414,20 @@ def trackHandler(request):
         return callsign
     stationPath = yield from getStationPathByAdminCS( callsign )
     trackJsonPath = stationPath + '/track.json'
+    trackJson = { 'version': time.time(), 'file': 'track.xml' }
     if 'file' in data:
-        with open( stationPath + '/track.xml', 'wb' ) as f:
-            f.write( base64.b64decode( data['file'].split( ',' )[1] ) )
+        file = base64.b64decode( data['file'].split( ',' )[1] )
+        if data['name'].lower().endswith( 'kmz' ):
+            zFile = zipfile.ZipFile( io.BytesIO( file ), 'r' )
+            for f in zFile.infolist():
+                if f.filename.endswith( 'kml' ):
+                    trackJson['file'] = f.filename
+                zFile.extract( f, path = stationPath )
+        else:
+            with open( stationPath + '/track.xml', 'wb' ) as f:
+                f.write( file )
         with open( trackJsonPath, 'w' ) as fj:
-            json.dump( { 'version': time.time() }, fj )
+            json.dump( trackJson, fj )
     if 'clear' in data and os.path.isfile( trackJsonPath ):
         os.remove( trackJsonPath )
     return web.Response( text = 'OK' )
