@@ -42,7 +42,7 @@ if not defUserSettings:
     defUserSettings = {}
 
 jsonTemplates = { 'settings': defUserSettings, \
-    'log': {}, 'chat': {}, 'news': {}, 'cluster': {}, 'status': {}, \
+    'log': [], 'chat': [], 'news': [], 'cluster': [], 'status': {}, \
     'chatUsers': {} }
 
 def dtFmt( dt ):
