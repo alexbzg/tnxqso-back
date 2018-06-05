@@ -285,6 +285,25 @@ def userSettingsHandler(request):
             data['settings']['admin'] = callsign
             with open( stationPath + '/settings.json', 'w' ) as f:
                 json.dump( data['settings'], f, ensure_ascii = False )
+    elif 'userColumns'in data:
+        userData = yield from getUserData( callsign )
+        settings = userData['settings']
+        userColumns = settings['log']['userColumns']
+        for c in range(0, len( data['userColumns'] ) ):
+            if len( settings ) <= c:
+                userColumns.append( 
+                        { 'enabled': True, 'column': data['userColumns'][c] } )
+            else:
+                userColumns[c]['column'] = data['userColumns'][c]
+        userColumns = userColumns[:len( data['userColumns'] )]
+        yield from db.paramUpdate( 'users', { 'callsign': callsign }, \
+            { 'settings': json.dumps( settings ) } )        
+        stationCallsign = userData['settings']['station']['callsign']
+        if stationCallsign:
+            stationPath = getStationPath( stationCallsign )
+            if stationPath:
+                with open( stationPath + '/settings.json', 'w' ) as f:
+                    json.dump( settings, f, ensure_ascii = False )
     else:
         yield from db.paramUpdate( 'users', { 'callsign': callsign }, \
             spliceParams( data, ( 'email', 'password' ) ) )
@@ -397,7 +416,7 @@ def activeUsersHandler(request):
     if not au:
         au = {}
     au = { k : v for k, v in au.items() \
-            if nowTs - v['ts'] > 120 }
+            if nowTs - v['ts'] < 120 }
     au[data['user']] = { 'chat': data['chat'], 'ts': nowTs, \
             'admin': data['user'] in stationAdmins, \
             'typing': data['typing'] }
