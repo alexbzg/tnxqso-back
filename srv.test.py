@@ -302,6 +302,7 @@ def userSettingsHandler(request):
         if stationCallsign:
             stationPath = getStationPath( stationCallsign )
             if stationPath:
+                settings['admin'] = callsign
                 with open( stationPath + '/settings.json', 'w' ) as f:
                     json.dump( settings, f, ensure_ascii = False )
     else:
@@ -410,6 +411,8 @@ def activeUsersHandler(request):
     stationPath = getStationPath( data['station'] )
     auPath = stationPath + '/activeUsers.json'
     stationSettings = loadJSON( stationPath + '/settings.json' )
+    if not stationSettings:
+        return web.HTTPBadRequest( text = 'This station was deleted or moved' )
     stationAdmins = stationSettings['chatAdmins'] + [ stationSettings['admin'] ]
     au = loadJSON( auPath )
     nowTs = time.time()
@@ -435,6 +438,7 @@ def trackHandler(request):
     trackJsonPath = stationPath + '/track.json'
     trackJson = { 'version': time.time(), 'file': 'track.xml' }
     if 'file' in data:
+        trackJson['filename'] = data['name']
         file = base64.b64decode( data['file'].split( ',' )[1] )
         if data['name'].lower().endswith( 'kmz' ):
             zFile = zipfile.ZipFile( io.BytesIO( file ), 'r' )

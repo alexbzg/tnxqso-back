@@ -2,7 +2,7 @@
 #coding=utf-8
 
 import argparse, asyncio, logging, logging.handlers, aiohttp, jwt, os, base64, \
-        json, time, math, smtplib, shutil
+        json, time, math, smtplib, shutil, io, zipfile
 from datetime import datetime
 from aiohttp import web
 from common import siteConf, loadJSON, appRoot, startLogging
@@ -42,7 +42,7 @@ if not defUserSettings:
     defUserSettings = {}
 
 jsonTemplates = { 'settings': defUserSettings, \
-    'log': {}, 'chat': {}, 'news': {}, 'cluster': {}, 'status': {}, \
+    'log': [], 'chat': [], 'news': [], 'cluster': [], 'status': {}, \
     'chatUsers': {} }
 
 def dtFmt( dt ):
@@ -285,6 +285,26 @@ def userSettingsHandler(request):
             data['settings']['admin'] = callsign
             with open( stationPath + '/settings.json', 'w' ) as f:
                 json.dump( data['settings'], f, ensure_ascii = False )
+    elif 'userColumns'in data:
+        userData = yield from getUserData( callsign )
+        settings = userData['settings']
+        userColumns = settings['log']['userColumns']
+        for c in range(0, len( data['userColumns'] ) ):
+            if len( settings ) <= c:
+                userColumns.append( 
+                        { 'enabled': True, 'column': data['userColumns'][c] } )
+            else:
+                userColumns[c]['column'] = data['userColumns'][c]
+        userColumns = userColumns[:len( data['userColumns'] )]
+        yield from db.paramUpdate( 'users', { 'callsign': callsign }, \
+            { 'settings': json.dumps( settings ) } )        
+        stationCallsign = userData['settings']['station']['callsign']
+        if stationCallsign:
+            stationPath = getStationPath( stationCallsign )
+            if stationPath:
+                settings['admin'] = callsign
+                with open( stationPath + '/settings.json', 'w' ) as f:
+                    json.dump( settings, f, ensure_ascii = False )
     else:
         yield from db.paramUpdate( 'users', { 'callsign': callsign }, \
             spliceParams( data, ( 'email', 'password' ) ) )
@@ -391,13 +411,15 @@ def activeUsersHandler(request):
     stationPath = getStationPath( data['station'] )
     auPath = stationPath + '/activeUsers.json'
     stationSettings = loadJSON( stationPath + '/settings.json' )
+    if not stationSettings:
+        return web.HTTPBadRequest( text = 'This station was deleted or moved' )
     stationAdmins = stationSettings['chatAdmins'] + [ stationSettings['admin'] ]
     au = loadJSON( auPath )
     nowTs = time.time()
     if not au:
         au = {}
     au = { k : v for k, v in au.items() \
-            if nowTs - v['ts'] > 120 }
+            if nowTs - v['ts'] < 120 }
     au[data['user']] = { 'chat': data['chat'], 'ts': nowTs, \
             'admin': data['user'] in stationAdmins, \
             'typing': data['typing'] }
@@ -414,11 +436,21 @@ def trackHandler(request):
         return callsign
     stationPath = yield from getStationPathByAdminCS( callsign )
     trackJsonPath = stationPath + '/track.json'
+    trackJson = { 'version': time.time(), 'file': 'track.xml' }
     if 'file' in data:
-        with open( stationPath + '/track.xml', 'wb' ) as f:
-            f.write( base64.b64decode( data['file'].split( ',' )[1] ) )
+        trackJson['filename'] = data['name']
+        file = base64.b64decode( data['file'].split( ',' )[1] )
+        if data['name'].lower().endswith( 'kmz' ):
+            zFile = zipfile.ZipFile( io.BytesIO( file ), 'r' )
+            for f in zFile.infolist():
+                if f.filename.endswith( 'kml' ):
+                    trackJson['file'] = f.filename
+                zFile.extract( f, path = stationPath )
+        else:
+            with open( stationPath + '/track.xml', 'wb' ) as f:
+                f.write( file )
         with open( trackJsonPath, 'w' ) as fj:
-            json.dump( { 'version': time.time() }, fj )
+            json.dump( trackJson, fj )
     if 'clear' in data and os.path.isfile( trackJsonPath ):
         os.remove( trackJsonPath )
     return web.Response( text = 'OK' )
