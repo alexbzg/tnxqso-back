@@ -10,15 +10,17 @@ def toDict( cur, keys = None ):
     if cur and cur.rowcount:
         colNames = [ col.name for col in cur.description ]
         if cur.rowcount == 1 and not keys:
-            return dict( zip( colNames, ( yield from cur.fetchone() ) ) )
+            data = yield from cur.fetchone()
+            return dict( zip( colNames, data ) )
         else:
+            data = yield from cur.fetchall()
             if ( 'id' in colNames ) and keys:
                 idIdx = colNames.index( 'id' )
                 return { row[ idIdx ]: dict( zip( colNames, row ) ) \
-                        for row in ( yield from cur.fetchall() ) }
+                        for row in data }
             else:
                 return [ dict( zip( colNames, row ) ) for
-                        row in cur.fetchall() ]
+                        row in data ]
     else:
         return False
 
@@ -59,9 +61,9 @@ class DBConn:
     @asyncio.coroutine
     def fetch( self, sql, params = None ):
         res = False
-        with (yield from self.execute( sql, params )) as cur:
-            if cur.rowcount:
-                res = yield from cur.fetchall()
+        cur = yield from self.execute( sql, params )
+        if cur.rowcount:
+            res = yield from cur.fetchall()
         return res
 
     @asyncio.coroutine

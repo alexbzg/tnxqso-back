@@ -456,6 +456,19 @@ def trackHandler(request):
     return web.Response( text = 'OK' )
 
 @asyncio.coroutine
+def logFromDB(callsign):
+    log = []
+    data = yield from db.execute( 
+        "select id, qso from log where callsign = %(cs)s order by id desc",
+            { 'cs': callsign } )
+    if data:
+        if isinstance( data, dict ):
+            log.append( data )
+        else:
+            log = [ row['qso'] for row in data ]
+    return log
+
+@asyncio.coroutine
 def logHandler(request):
     data = yield from request.json()
     callsign = decodeToken( data )
@@ -463,10 +476,16 @@ def logHandler(request):
         return callsign
     stationPath = yield from getStationPathByAdminCS( callsign )
     logPath = stationPath + '/log.json'
-    log = loadJSON( logPath )
+    log = []
+    if not os.path.isfile( logPath ):
+        logging.exception( logPath + " not found" )
+    try:
+        log = json.load( open( logPath ) )
+    except Exception as ex:
+        logging.error( "Error loading qso log" + logPath )
+        logging.exception( ex )
+        log = yield from logFromDB( callsign )        
     if 'qso' in data:
-        if not log:
-            log = []
         qso = data['qso']
         dt = datetime.strptime( qso['ts'], "%Y-%m-%d %H:%M:%S" )
         if qso['rda']:
@@ -476,6 +495,10 @@ def logHandler(request):
         qso['date'], qso['time'] = dtFmt( dt )
         qso['ts'] = time.time()
         log.insert( 0, qso )
+        yield from db.execute( 
+            "insert into log (callsign, qso) values ( %(callsign)s, %(qso)s )",
+            { 'callsign': callsign, 'qso': json.dumps( qso ) } )
+
     if 'clear' in data:
         log = []
     with open( logPath, 'w' ) as f:
