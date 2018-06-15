@@ -229,9 +229,14 @@ def publishHandler(request):
         publish = {}
     if not data['station'] in publish:
         publish[data['station']] = {}
-    publish[data['station']]['admin'] = data['publish']
+    publish[data['station']] = data['publish']
     with open( publishPath, 'w' ) as f:
         json.dump( publish, f, ensure_ascii = False )
+    stationPath = getStationPath( data['station'] )
+    stationSettings = loadJSON( stationPath + '/settings.json' )
+    stationSettings['publish'] = data['publish']['user']
+    yield from saveStationSettings( data['station'], stationSettings['admin'],
+            stationSettings )
     return web.Response( text = 'OK' )
 
 @asyncio.coroutine
@@ -277,14 +282,10 @@ def userSettingsHandler(request):
             publish[cs]['user'] = data['settings']['publish']
         with open( publishPath, 'w' ) as f:
             json.dump( publish, f, ensure_ascii = False )
-        yield from db.paramUpdate( 'users', { 'callsign': callsign }, \
-            { 'settings': json.dumps( data['settings'] ) } )
         if stationPath:
             if not os.path.exists( stationPath ):
                 createStationDir( stationPath )
-            data['settings']['admin'] = callsign
-            with open( stationPath + '/settings.json', 'w' ) as f:
-                json.dump( data['settings'], f, ensure_ascii = False )
+        yield from saveStationSettings( cs, callsign, data['settings'] )
     elif 'userColumns'in data:
         userData = yield from getUserData( callsign )
         settings = userData['settings']
@@ -296,19 +297,24 @@ def userSettingsHandler(request):
             else:
                 userColumns[c]['column'] = data['userColumns'][c]
         userColumns = userColumns[:len( data['userColumns'] )]
-        yield from db.paramUpdate( 'users', { 'callsign': callsign }, \
-            { 'settings': json.dumps( settings ) } )        
-        stationCallsign = userData['settings']['station']['callsign']
-        if stationCallsign:
-            stationPath = getStationPath( stationCallsign )
-            if stationPath:
-                settings['admin'] = callsign
-                with open( stationPath + '/settings.json', 'w' ) as f:
-                    json.dump( settings, f, ensure_ascii = False )
+        yield from saveStationSettings( 
+            userData['settings']['station']['callsign'],
+            callsign, settings )
     else:
         yield from db.paramUpdate( 'users', { 'callsign': callsign }, \
             spliceParams( data, ( 'email', 'password' ) ) )
     return web.Response( text = 'OK' )
+
+@asyncio.coroutine
+def saveStationSettings( stationCallsign, adminCallsign, settings ):
+    yield from db.paramUpdate( 'users', { 'callsign': adminCallsign }, \
+        { 'settings': json.dumps( settings ) } )
+    if stationCallsign:
+        stationPath = getStationPath( stationCallsign )
+        if stationPath:
+            settings['admin'] = adminCallsign
+            with open( stationPath + '/settings.json', 'w' ) as f:
+                json.dump( settings, f, ensure_ascii = False )
 
 def createStationDir( path ):
     os.makedirs( path )
