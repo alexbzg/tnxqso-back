@@ -24,6 +24,10 @@ for root in roots:
             reCS = []
             for cs in settings['clusterCallsigns']:
                 reCS.append( re.compile( '^' + cs.replace( '*', '.*' ) + '$' ) )
+            reHl = []
+            if 'clusterHighlight' in settings and settings['clusterHighlight']:
+                for cs in settings['clusterHighlight']:
+                    reHl.append( re.compile( '^' + cs.replace( '*', '.*' ) + '$' ) )
             stationDXpath = station + '/cluster.json'
             stationDX = loadJSON( stationDXpath )
             if not stationDX:
@@ -35,6 +39,10 @@ for root in roots:
                     break
                 for r in reCS:
                     if r.match( item['cs'] ):
+                        for rh in reHl:
+                            if rh.match( item['cs'] ):
+                                item['highlight'] = True
+                                break
                         stationDX.insert( idx, item )
                         idx += 1
             if len( stationDX ) > 20:
