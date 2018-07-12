@@ -2,10 +2,11 @@
 #coding=utf-8
 
 import argparse, asyncio, logging, logging.handlers, aiohttp, jwt, os, base64, \
-        json, time, math, smtplib, shutil, io, zipfile
+        json, time, math, smtplib, shutil, io, zipfile, pwd, grp
 from datetime import datetime
 from aiohttp import web
-from common import siteConf, loadJSON, appRoot, startLogging
+from common import siteConf, loadJSON, appRoot, startLogging, \
+        createFtpUser, setFtpDir
 from tqdb import DBConn, spliceParams
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -141,6 +142,8 @@ def contactHandler(request):
         return web.Response( text = 'OK' )
     return web.HTTPBadRequest( text = error )
 
+def ftpUser( cs ):
+    return 'tnxqso_' + ( 'test_' if args.test else '' ) + cs
 
 
 def sendEmail( **email ):
@@ -189,6 +192,8 @@ def loginHandler(request):
                         'password': data['password'], \
                         'email': data['email'],
                         'settings': json.dumps( defUserSettings ) }, True )
+                    createFtpUser( ftpUser( data['login'] ), \
+                            data['password'] )
         else:
             if not userData or userData['password'] != data['password']:
                 error = 'Wrong callsign or password.'            
@@ -267,7 +272,7 @@ def userSettingsHandler(request):
                     return web.HTTPBadRequest( \
                         text = 'Station callsign ' + newCs.upper() + \
                             'is already registered' )
-                    createStationDir( newPath )
+                    createStationDir( newPath, callsign )
                 if cs and cs in publish:
                     if newCs:
                         publish[newCs] = publish[cs]
@@ -284,7 +289,7 @@ def userSettingsHandler(request):
             json.dump( publish, f, ensure_ascii = False )
         if stationPath:
             if not os.path.exists( stationPath ):
-                createStationDir( stationPath )
+                createStationDir( stationPath, callsign )
         yield from saveStationSettings( cs, callsign, data['settings'] )
     elif 'userColumns'in data:
         userData = yield from getUserData( callsign )
@@ -316,12 +321,14 @@ def saveStationSettings( stationCallsign, adminCallsign, settings ):
             with open( stationPath + '/settings.json', 'w' ) as f:
                 json.dump( settings, f, ensure_ascii = False )
 
-def createStationDir( path ):
+def createStationDir( path, callsign ):
     os.makedirs( path )
     for k, v in jsonTemplates.items():
         with open( path + '/' + k + '.json', 'w' ) as f:
             json.dump( v, f, ensure_ascii = False )
-
+    pathFtp = path + '/ftp'
+    os.makedirs( pathFtp )
+    setFtpDir( ftpUser( callsign ), pathFtp )
 
 def decodeToken( data ):
     callsign = None
@@ -518,16 +525,14 @@ def chatHandler(request):
     stationPath = getStationPath( data['station'] )
     stationSettings = loadJSON( stationPath + '/settings.json' )
     chatAdmins = stationSettings['chatAdmins'] + [ stationSettings['admin'], ]
-    admin = False
-    if ( 'from' in data and data['from'] in chatAdmins ) \
-        or 'clear' in data or 'delete' in data:
+    admin = 'from' in data and data['from'] in chatAdmins
+    if 'clear' in data or 'delete' in data:
         callsign = decodeToken( data )
         if not isinstance( callsign, str ):
             return callsign
         if not callsign in chatAdmins and not callsign in siteAdmins:
             return web.HTTPUnauthorized( \
-                text = 'You must be logged in as chat admin' )
-        admin = True    
+                text = 'You must be logged in as station or site admin' )
     chatPath = stationPath + '/chat.json'
     chat = []
     if not 'clear' in data:

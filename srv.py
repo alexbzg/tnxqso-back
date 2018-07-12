@@ -518,16 +518,14 @@ def chatHandler(request):
     stationPath = getStationPath( data['station'] )
     stationSettings = loadJSON( stationPath + '/settings.json' )
     chatAdmins = stationSettings['chatAdmins'] + [ stationSettings['admin'], ]
-    admin = False
-    if ( 'from' in data and data['from'] in chatAdmins ) \
-        or 'clear' in data or 'delete' in data:
+    admin = 'from' in data and data['from'] in chatAdmins
+    if 'clear' in data or 'delete' in data:
         callsign = decodeToken( data )
         if not isinstance( callsign, str ):
             return callsign
         if not callsign in chatAdmins and not callsign in siteAdmins:
             return web.HTTPUnauthorized( \
-                text = 'You must be logged in as chat admin' )
-        admin = True    
+                text = 'You must be logged in as station or site admin' )
     chatPath = stationPath + '/chat.json'
     chat = []
     if not 'clear' in data:
