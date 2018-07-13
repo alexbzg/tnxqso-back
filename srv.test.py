@@ -6,7 +6,7 @@ import argparse, asyncio, logging, logging.handlers, aiohttp, jwt, os, base64, \
 from datetime import datetime
 from aiohttp import web
 from common import siteConf, loadJSON, appRoot, startLogging, \
-        createFtpUser, setFtpDir
+        createFtpUser
 from tqdb import DBConn, spliceParams
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -191,9 +191,10 @@ def loginHandler(request):
                         { 'callsign': data['login'], \
                         'password': data['password'], \
                         'email': data['email'],
-                        'settings': json.dumps( defUserSettings ) }, True )
-                    createFtpUser( ftpUser( data['login'] ), \
-                            data['password'] )
+                        'settings': 
+                            json.dumps( defUserSettings ) }, True )
+                    createFtpUser( data['login'], data['password'], 
+                        args.test )
         else:
             if not userData or userData['password'] != data['password']:
                 error = 'Wrong callsign or password.'            
@@ -326,9 +327,6 @@ def createStationDir( path, callsign ):
     for k, v in jsonTemplates.items():
         with open( path + '/' + k + '.json', 'w' ) as f:
             json.dump( v, f, ensure_ascii = False )
-    pathFtp = path + '/ftp'
-    os.makedirs( pathFtp )
-    setFtpDir( ftpUser( callsign ), pathFtp )
 
 def decodeToken( data ):
     callsign = None

@@ -2,7 +2,7 @@
 #coding=utf-8
 
 
-import configparser, decimal, json, logging, logging.handlers
+import configparser, decimal, json, logging, logging.handlers, os
 from os import path
 from datetime import datetime, date
 from passlib.apache import HtpasswdFile
@@ -53,15 +53,15 @@ def startLogging( type, level = logging.DEBUG ):
         '%(asctime)s %(name)-12s %(levelname)-8s %(message)s' ) )
     logger.addHandler( loggerHandler )
 
-def setFtpDir( user, path ):
-    conf = siteConf()
-    with open( conf.get( 'ftp', 'user_conf_dir' ) + '/' + user, \
-            'w' ) as uf:  
-        uf.write( 'local_root=' + path ) 
-
 def createFtpUser( user, passwd, test = False ):
     conf = siteConf()
-    ht = HtpasswdFile( conf.get( 'ftp', 'passwd_file' ) )
+    ht = HtpasswdFile( conf.get( 'ftp', 'passwd_file' ), 
+            default_scheme = "md5_crypt" )
     ht.set_password( user, passwd )
     ht.save()
+    ftpPath = conf.get( 'web', 'root_test' if test else 'root' ) + \
+            '/ftp/' + user
+    os.makedirs( ftpPath )
+    os.chmod( ftpPath, 0o775 )
+
 
