@@ -55,12 +55,12 @@ def startLogging( type, level = logging.DEBUG ):
 
 def createFtpUser( user, passwd, test = False ):
     conf = siteConf()
-    ht = HtpasswdFile( conf.get( 'ftp', 'passwd_file' ), 
+    testPfx = '_test' if test else ''
+    ht = HtpasswdFile( conf.get( 'ftp', 'passwd' + testPfx ), 
             default_scheme = "md5_crypt" )
     ht.set_password( user, passwd )
     ht.save()
-    ftpPath = conf.get( 'web', 'root_test' if test else 'root' ) + \
-            '/ftp/' + user
+    ftpPath = conf.get( 'web', 'root' + testPfx ) + '/ftp/' + user
     os.makedirs( ftpPath )
     os.chmod( ftpPath, 0o775 )
 
