@@ -64,4 +64,7 @@ def createFtpUser( user, passwd, test = False ):
     os.makedirs( ftpPath )
     os.chmod( ftpPath, 0o775 )
 
+def dtFmt( dt ):
+    return dt.strftime( '%d %b' ).lower(), dt.strftime( '%H:%Mz' )
+
 

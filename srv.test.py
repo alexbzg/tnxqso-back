@@ -6,7 +6,7 @@ import argparse, asyncio, logging, logging.handlers, aiohttp, jwt, os, base64, \
 from datetime import datetime
 from aiohttp import web
 from common import siteConf, loadJSON, appRoot, startLogging, \
-        createFtpUser
+        createFtpUser, dtFmt
 from tqdb import DBConn, spliceParams
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -46,8 +46,6 @@ jsonTemplates = { 'settings': defUserSettings, \
     'log': [], 'chat': [], 'news': [], 'cluster': [], 'status': {}, \
     'chatUsers': {} }
 
-def dtFmt( dt ):
-    return dt.strftime( '%d %b' ).lower(), dt.strftime( '%H:%Mz' )
 
 @asyncio.coroutine
 def checkRecaptcha( response ):
