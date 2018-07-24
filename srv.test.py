@@ -365,7 +365,11 @@ def locationHandler( request ):
     data['loc'] = newData['loc']
     data['rafa'] = newData['rafa']
     data['rda'] = newData['rda']
-    if newData['location']:
+    data['wff'] = newData['wff']
+    data['userFields'] = newData['userFields']
+    if 'online' in newData:
+        data['online'] = newData['online']
+    if 'location' in newData and newData['location']:
         if 'location' in data and data['location']:
             data['prev'] = { 'location': data['location'][:], \
                     'ts': data['locTs'] }
@@ -429,7 +433,7 @@ def activeUsersHandler(request):
         au = {}
     au = { k : v for k, v in au.items() \
             if nowTs - v['ts'] < 120 }
-    au[data['user']] = { 'chat': data['chat'], 'ts': nowTs, \
+    au[replace0(data['user'])] = { 'chat': data['chat'], 'ts': nowTs, \
             'admin': data['user'] in stationAdmins, \
             'typing': data['typing'] }
     with open( auPath, 'w' ) as f:
@@ -494,25 +498,35 @@ def logHandler(request):
         logging.error( "Error loading qso log" + logPath )
         logging.exception( ex )
         log = yield from logFromDB( callsign )        
+
     if 'qso' in data:
         qso = data['qso']
         dt = datetime.strptime( qso['ts'], "%Y-%m-%d %H:%M:%S" )
-        if qso['rda']:
-            qso['rda'] = qso['rda'].upper()
-        if qso['wff']:
-            qso['wff'] = qso['wff'].upper()
         qso['date'], qso['time'] = dtFmt( dt )
-        qso['ts'] = time.time()
-        log.insert( 0, qso )
-        yield from db.execute( 
-            "insert into log (callsign, qso) values ( %(callsign)s, %(qso)s )",
-            { 'callsign': callsign, 'qso': json.dumps( qso ) } )
+        sameFl = True
+        for key in qso:
+            if not key in ('ts', 'rda', 'wff') and qso[key] != log[0][key]:
+                sameFl = False
+                break
+        if not sameFl:
+            if qso['rda']:
+                qso['rda'] = qso['rda'].upper()
+            if qso['wff']:
+                qso['wff'] = qso['wff'].upper()
+            qso['ts'] = time.time()
+            log.insert( 0, qso )
+            yield from db.execute( 
+                "insert into log (callsign, qso) values ( %(callsign)s, %(qso)s )",
+                { 'callsign': callsign, 'qso': json.dumps( qso ) } )
 
     if 'clear' in data:
         log = []
     with open( logPath, 'w' ) as f:
         json.dump( log, f )
     return web.Response( text = 'OK' )
+
+def replace0( val ):
+    return val.replace( "0", u"\u00D8" )
 
 
 @asyncio.coroutine
@@ -538,10 +552,14 @@ def chatHandler(request):
         if 'delete' in data:
             chat = [ x for x in chat if x['ts'] != data['delete'] ]
         else:
-            msg = { 'user': data['from'], 'text': data['text'], \
+            msg = { 'user': replace0( data['from'] ), 'text': data['text'], \
                     'admin': admin, 'ts': time.time() }
             msg['date'], msg['time'] = dtFmt( datetime.utcnow() )
+            if 'name' in data:
+                msg['name'] = data['name']
             chat.insert( 0, msg )
+    if len( chat ) > 100:
+        chat = chat[:100]
     with open( chatPath, 'w' ) as f:
         json.dump( chat, f, ensure_ascii = False )
     return web.Response( text = 'OK' )
@@ -557,7 +575,8 @@ if __name__ == '__main__':
     app.router.add_post('/aiohttp/log', logHandler)
     app.router.add_post('/aiohttp/location', locationHandler)
     app.router.add_post('/aiohttp/publish', publishHandler)
-    app.router.add_post('/aiohttp/passwordRecoveryRequest', passwordRecoveryRequestHandler )
+    app.router.add_post('/aiohttp/passwordRecoveryRequest', \
+            passwordRecoveryRequestHandler )
     app.router.add_post('/aiohttp/contact', contactHandler )
     app.router.add_post('/aiohttp/userData', userDataHandler )
     db.verbose = True

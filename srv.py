@@ -2,10 +2,11 @@
 #coding=utf-8
 
 import argparse, asyncio, logging, logging.handlers, aiohttp, jwt, os, base64, \
-        json, time, math, smtplib, shutil, io, zipfile
+        json, time, math, smtplib, shutil, io, zipfile, pwd, grp
 from datetime import datetime
 from aiohttp import web
-from common import siteConf, loadJSON, appRoot, startLogging
+from common import siteConf, loadJSON, appRoot, startLogging, \
+        createFtpUser, dtFmt
 from tqdb import DBConn, spliceParams
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -45,8 +46,6 @@ jsonTemplates = { 'settings': defUserSettings, \
     'log': [], 'chat': [], 'news': [], 'cluster': [], 'status': {}, \
     'chatUsers': {} }
 
-def dtFmt( dt ):
-    return dt.strftime( '%d %b' ).lower(), dt.strftime( '%H:%Mz' )
 
 @asyncio.coroutine
 def checkRecaptcha( response ):
@@ -141,6 +140,8 @@ def contactHandler(request):
         return web.Response( text = 'OK' )
     return web.HTTPBadRequest( text = error )
 
+def ftpUser( cs ):
+    return 'tnxqso_' + ( 'test_' if args.test else '' ) + cs
 
 
 def sendEmail( **email ):
@@ -188,7 +189,10 @@ def loginHandler(request):
                         { 'callsign': data['login'], \
                         'password': data['password'], \
                         'email': data['email'],
-                        'settings': json.dumps( defUserSettings ) }, True )
+                        'settings': 
+                            json.dumps( defUserSettings ) }, True )
+                    createFtpUser( data['login'], data['password'], 
+                        args.test )
         else:
             if not userData or userData['password'] != data['password']:
                 error = 'Wrong callsign or password.'            
@@ -267,7 +271,7 @@ def userSettingsHandler(request):
                     return web.HTTPBadRequest( \
                         text = 'Station callsign ' + newCs.upper() + \
                             'is already registered' )
-                    createStationDir( newPath )
+                    createStationDir( newPath, callsign )
                 if cs and cs in publish:
                     if newCs:
                         publish[newCs] = publish[cs]
@@ -284,7 +288,7 @@ def userSettingsHandler(request):
             json.dump( publish, f, ensure_ascii = False )
         if stationPath:
             if not os.path.exists( stationPath ):
-                createStationDir( stationPath )
+                createStationDir( stationPath, callsign )
         yield from saveStationSettings( cs, callsign, data['settings'] )
     elif 'userColumns'in data:
         userData = yield from getUserData( callsign )
@@ -316,12 +320,11 @@ def saveStationSettings( stationCallsign, adminCallsign, settings ):
             with open( stationPath + '/settings.json', 'w' ) as f:
                 json.dump( settings, f, ensure_ascii = False )
 
-def createStationDir( path ):
+def createStationDir( path, callsign ):
     os.makedirs( path )
     for k, v in jsonTemplates.items():
         with open( path + '/' + k + '.json', 'w' ) as f:
             json.dump( v, f, ensure_ascii = False )
-
 
 def decodeToken( data ):
     callsign = None
@@ -426,7 +429,7 @@ def activeUsersHandler(request):
         au = {}
     au = { k : v for k, v in au.items() \
             if nowTs - v['ts'] < 120 }
-    au[data['user']] = { 'chat': data['chat'], 'ts': nowTs, \
+    au[replace0(data['user'])] = { 'chat': data['chat'], 'ts': nowTs, \
             'admin': data['user'] in stationAdmins, \
             'typing': data['typing'] }
     with open( auPath, 'w' ) as f:
@@ -491,25 +494,35 @@ def logHandler(request):
         logging.error( "Error loading qso log" + logPath )
         logging.exception( ex )
         log = yield from logFromDB( callsign )        
+
     if 'qso' in data:
         qso = data['qso']
         dt = datetime.strptime( qso['ts'], "%Y-%m-%d %H:%M:%S" )
-        if qso['rda']:
-            qso['rda'] = qso['rda'].upper()
-        if qso['wff']:
-            qso['wff'] = qso['wff'].upper()
         qso['date'], qso['time'] = dtFmt( dt )
-        qso['ts'] = time.time()
-        log.insert( 0, qso )
-        yield from db.execute( 
-            "insert into log (callsign, qso) values ( %(callsign)s, %(qso)s )",
-            { 'callsign': callsign, 'qso': json.dumps( qso ) } )
+        sameFl = True
+        for key in qso:
+            if not key in ('ts', 'rda', 'wff') and qso[key] != log[0][key]:
+                sameFl = False
+                break
+        if not sameFl:
+            if qso['rda']:
+                qso['rda'] = qso['rda'].upper()
+            if qso['wff']:
+                qso['wff'] = qso['wff'].upper()
+            qso['ts'] = time.time()
+            log.insert( 0, qso )
+            yield from db.execute( 
+                "insert into log (callsign, qso) values ( %(callsign)s, %(qso)s )",
+                { 'callsign': callsign, 'qso': json.dumps( qso ) } )
 
     if 'clear' in data:
         log = []
     with open( logPath, 'w' ) as f:
         json.dump( log, f )
     return web.Response( text = 'OK' )
+
+def replace0( val ):
+    return val.replace( "0", u"\u00D8" )
 
 
 @asyncio.coroutine
@@ -535,10 +548,14 @@ def chatHandler(request):
         if 'delete' in data:
             chat = [ x for x in chat if x['ts'] != data['delete'] ]
         else:
-            msg = { 'user': data['from'], 'text': data['text'], \
+            msg = { 'user': replace0( data['from'] ), 'text': data['text'], \
                     'admin': admin, 'ts': time.time() }
             msg['date'], msg['time'] = dtFmt( datetime.utcnow() )
+            if 'name' in data:
+                msg['name'] = data['name']
             chat.insert( 0, msg )
+    if len( chat ) > 100:
+        chat = chat[:100]
     with open( chatPath, 'w' ) as f:
         json.dump( chat, f, ensure_ascii = False )
     return web.Response( text = 'OK' )
@@ -554,7 +571,8 @@ if __name__ == '__main__':
     app.router.add_post('/aiohttp/log', logHandler)
     app.router.add_post('/aiohttp/location', locationHandler)
     app.router.add_post('/aiohttp/publish', publishHandler)
-    app.router.add_post('/aiohttp/passwordRecoveryRequest', passwordRecoveryRequestHandler )
+    app.router.add_post('/aiohttp/passwordRecoveryRequest', \
+            passwordRecoveryRequestHandler )
     app.router.add_post('/aiohttp/contact', contactHandler )
     app.router.add_post('/aiohttp/userData', userDataHandler )
     db.verbose = True
