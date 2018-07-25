@@ -293,13 +293,12 @@ def userSettingsHandler(request):
     elif 'userColumns'in data:
         userData = yield from getUserData( callsign )
         settings = userData['settings']
-        userColumns = settings['log']['userColumns']
+        userColumns = settings['userColumns']
         for c in range(0, len( data['userColumns'] ) ):
             if len( settings ) <= c:
-                userColumns.append( 
-                        { 'enabled': True, 'column': data['userColumns'][c] } )
+                userColumns.append( data['userColumns'][c] )
             else:
-                userColumns[c]['column'] = data['userColumns'][c]
+                userColumns[c] = data['userColumns'][c]
         userColumns = userColumns[:len( data['userColumns'] )]
         yield from saveStationSettings( 
             userData['settings']['station']['callsign'],

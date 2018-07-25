@@ -67,4 +67,25 @@ def createFtpUser( user, passwd, test = False ):
 def dtFmt( dt ):
     return dt.strftime( '%d %b' ).lower(), dt.strftime( '%H:%Mz' )
 
+def qth( _lat, _lon ):
+    r = ''
+    lat = float( _lat )
+    lng = float( _lon )
+
+    lat += 90
+    lng += 180
+    lat = lat / 10 + 0.0000001
+    lng = lng / 20 + 0.0000001
+    r += chr(int(65 + lng))
+    r += chr(int(65 + lat))
+    lat = 10 * (lat - int(lat))
+    lng = 10 * (lng - int(lng))
+    r += chr(int(48 + lng))
+    r += chr(int(48 + lat))
+    lat = 24 * (lat - int(lat))
+    lng = 24 * (lng - int(lng))
+    r += chr(int(65 + lng))
+    r += chr(int(65 + lat))
+
+    return r
 
