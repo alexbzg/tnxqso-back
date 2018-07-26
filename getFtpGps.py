@@ -4,7 +4,8 @@
 import argparse, asyncio, logging, logging.handlers, aiohttp, jwt, os, base64, \
         json, time, math, smtplib, shutil, io, zipfile
 from datetime import datetime, timezone
-from common import siteConf, loadJSON, startLogging, createFtpUser, dtFmt, appRoot, qth
+from common import siteConf, loadJSON, startLogging, createFtpUser, dtFmt, \
+        appRoot, qth, tzOffset
 from tqdb import DBConn, spliceParams
 
 logging.basicConfig( level = logging.DEBUG )
@@ -52,11 +53,10 @@ def main():
                 ftpFilePath = ( ftpPath + '/' + fname )
                 if os.path.isfile( ftpFilePath ):
                     data = None
-                    with open( ftpPath + '/' + fn, 'r' ) as f:
+                    with open( ftpPath + '/' + fname, 'r' ) as f:
                         data = f.readlines()[-1].split( ',' )
                     dt = datetime.strptime( data[0], '%Y-%m-%dT%H:%M:%S.%fZ' )
-                    dt.replace( tzinfo = timezone.utc )
-                    ts = dt.timestamp() 
+                    ts = int( dt.timestamp() + tzOffset() )
                     if not 'ts' in status or status['ts'] < ts:
                         status['date'], status['time'] = dtFmt( dt )    
                         status['year'] = dt.year

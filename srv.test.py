@@ -6,7 +6,7 @@ import argparse, asyncio, logging, logging.handlers, aiohttp, jwt, os, base64, \
 from datetime import datetime
 from aiohttp import web
 from common import siteConf, loadJSON, appRoot, startLogging, \
-        createFtpUser, dtFmt
+        createFtpUser, dtFmt, tzOffset
 from tqdb import DBConn, spliceParams
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -357,8 +357,8 @@ def locationHandler( request ):
         data = {}
     if not 'locTs' in data and 'ts' in data:
         data['locTs'] = data['ts']
-    data['ts'] = int( datetime.now().strftime("%s") ) 
     dtUTC = datetime.utcnow()
+    data['ts'] = int( dtUTC.timestamp() + tzOffset() ) 
     data['date'], data['time'] = dtFmt( dtUTC )    
     data['year'] = dtUTC.year
     data['loc'] = newData['loc']

@@ -67,6 +67,9 @@ def createFtpUser( user, passwd, test = False ):
 def dtFmt( dt ):
     return dt.strftime( '%d %b' ).lower(), dt.strftime( '%H:%Mz' )
 
+def tzOffset():
+    return datetime.now().timestamp() - datetime.utcnow().timestamp()
+
 def qth( _lat, _lon ):
     r = ''
     lat = float( _lat )
