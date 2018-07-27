@@ -27,7 +27,10 @@ def main():
     users = yield from db.execute( "select callsign, settings from users" )
     for user in users:
         settings = user['settings']
-        settings['status'] = defStatus
+        if not 'status' in settings:
+            settings['status'] = defStatus
+        if not 'currentPositionIcon' in settings:
+            settings['currentPositionIcon'] = 0
         if not 'userFields' in settings:
             settings['userFields'] = []
             columns = settings['log']['userColumns']

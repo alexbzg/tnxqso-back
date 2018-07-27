@@ -369,6 +369,8 @@ def locationHandler( request ):
     if 'online' in newData:
         data['online'] = newData['online']
     if 'location' in newData and newData['location']:
+        if 'comments' in newData:
+            data['comments'] = newData['comments']
         if 'location' in data and data['location']:
             data['prev'] = { 'location': data['location'][:], \
                     'ts': data['locTs'] }
