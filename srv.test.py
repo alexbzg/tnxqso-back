@@ -293,7 +293,7 @@ def userSettingsHandler(request):
     elif 'userColumns'in data:
         userData = yield from getUserData( callsign )
         settings = userData['settings']
-        userColumns = settings['userColumns']
+        userColumns = settings['userFields']
         for c in range(0, len( data['userColumns'] ) ):
             if len( settings ) <= c:
                 userColumns.append( data['userColumns'][c] )
@@ -361,10 +361,10 @@ def locationHandler( request ):
     data['ts'] = int( dtUTC.timestamp() + tzOffset() ) 
     data['date'], data['time'] = dtFmt( dtUTC )    
     data['year'] = dtUTC.year
-    data['loc'] = newData['loc']
-    data['rafa'] = newData['rafa']
-    data['rda'] = newData['rda']
-    data['wff'] = newData['wff']
+    data['loc'] = newData['loc'] if 'loc' in newData else None
+    data['rafa'] = newData['rafa'] if 'rafa' in newData else None
+    data['rda'] = newData['rda'] if 'rda' in newData else None
+    data['wff'] = newData['wff'] if 'wff' in newData else None
     data['userFields'] = newData['userFields']
     if 'online' in newData:
         data['online'] = newData['online']
