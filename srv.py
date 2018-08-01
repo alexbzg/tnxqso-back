@@ -6,7 +6,7 @@ import argparse, asyncio, logging, logging.handlers, aiohttp, jwt, os, base64, \
 from datetime import datetime
 from aiohttp import web
 from common import siteConf, loadJSON, appRoot, startLogging, \
-        createFtpUser, dtFmt
+        createFtpUser, dtFmt, tzOffset
 from tqdb import DBConn, spliceParams
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -293,13 +293,12 @@ def userSettingsHandler(request):
     elif 'userColumns'in data:
         userData = yield from getUserData( callsign )
         settings = userData['settings']
-        userColumns = settings['log']['userColumns']
+        userColumns = settings['userFields']
         for c in range(0, len( data['userColumns'] ) ):
             if len( settings ) <= c:
-                userColumns.append( 
-                        { 'enabled': True, 'column': data['userColumns'][c] } )
+                userColumns.append( data['userColumns'][c] )
             else:
-                userColumns[c]['column'] = data['userColumns'][c]
+                userColumns[c] = data['userColumns'][c]
         userColumns = userColumns[:len( data['userColumns'] )]
         yield from saveStationSettings( 
             userData['settings']['station']['callsign'],
@@ -358,14 +357,20 @@ def locationHandler( request ):
         data = {}
     if not 'locTs' in data and 'ts' in data:
         data['locTs'] = data['ts']
-    data['ts'] = int( datetime.now().strftime("%s") ) 
     dtUTC = datetime.utcnow()
+    data['ts'] = int( dtUTC.timestamp() + tzOffset() ) 
     data['date'], data['time'] = dtFmt( dtUTC )    
     data['year'] = dtUTC.year
-    data['loc'] = newData['loc']
-    data['rafa'] = newData['rafa']
-    data['rda'] = newData['rda']
-    if newData['location']:
+    data['loc'] = newData['loc'] if 'loc' in newData else None
+    data['rafa'] = newData['rafa'] if 'rafa' in newData else None
+    data['rda'] = newData['rda'] if 'rda' in newData else None
+    data['wff'] = newData['wff'] if 'wff' in newData else None
+    data['userFields'] = newData['userFields']
+    if 'online' in newData:
+        data['online'] = newData['online']
+    if 'location' in newData and newData['location']:
+        if 'comments' in newData:
+            data['comments'] = newData['comments']
         if 'location' in data and data['location']:
             data['prev'] = { 'location': data['location'][:], \
                     'ts': data['locTs'] }
@@ -424,7 +429,7 @@ def activeUsersHandler(request):
         return web.HTTPBadRequest( text = 'This station was deleted or moved' )
     stationAdmins = stationSettings['chatAdmins'] + [ stationSettings['admin'] ]
     au = loadJSON( auPath )
-    nowTs = time.time()
+    nowTs = int( datetime.now().timestamp() ) 
     if not au:
         au = {}
     au = { k : v for k, v in au.items() \

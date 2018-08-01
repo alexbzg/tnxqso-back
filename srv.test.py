@@ -429,7 +429,7 @@ def activeUsersHandler(request):
         return web.HTTPBadRequest( text = 'This station was deleted or moved' )
     stationAdmins = stationSettings['chatAdmins'] + [ stationSettings['admin'] ]
     au = loadJSON( auPath )
-    nowTs = time.time()
+    nowTs = int( datetime.now().timestamp() ) 
     if not au:
         au = {}
     au = { k : v for k, v in au.items() \
