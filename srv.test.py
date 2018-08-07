@@ -586,10 +586,10 @@ def sendSpotHandler(request):
             port = conf.get( 'cluster', 'port' ) )
 
         def sendSpot():
-            protocol.write( 'dx ' + data['freq'] + ' ' + data['cs'] + ' ' + \
+            protocol.write( 'dx ' + data['cs'] + ' ' + data['freq'] + ' ' + \
                 data['info'] )
             response['sent'] = True
-            protocol.close()
+            app.loop.call_later( 1, protocol.close )
 
         if protocol:
             logging.debug( 'Protocol connected' )
