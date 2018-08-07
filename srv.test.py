@@ -573,9 +573,11 @@ def chatHandler(request):
 
 @asyncio.coroutine
 def sendSpotHandler(request):
+    global lastSpotSent
     data = yield from request.json()
     now = datetime.now().timestamp()
-    response = { 'sent': False, 'secondsLeft': conf.get( 'cluster', 'spotInterval' ) }
+    response = { 'sent': False, 
+            'secondsLeft': conf.getint( 'cluster', 'spotInterval' ) }
     if not lastSpotSent or now - lastSpotSent > response['secondsLeft']:
         lastSpotSent = now
         protocol = yield from  clusterProtocol.connect( app.loop, \
@@ -586,11 +588,15 @@ def sendSpotHandler(request):
         def sendSpot():
             protocol.write( 'dx ' + data['freq'] + ' ' + data['cs'] + ' ' + \
                 data['info'] )
+            response['sent'] = True
             protocol.close()
 
         if protocol:
             logging.debug( 'Protocol connected' )
-        response['sent'] = True
+            protocol.onLoggedIn.append( sendSpot )
+            yield from protocol.waitDisconnected()
+            if not response['sent']:
+                response['reply'] = protocol.latestReply
     else:
         response['secondsLeft'] -= now - lastSpotSent
     return web.json_response( response )
