@@ -8,6 +8,7 @@ from aiohttp import web
 from common import siteConf, loadJSON, appRoot, startLogging, \
         createFtpUser, dtFmt, tzOffset
 from tqdb import DBConn, spliceParams
+import clusterProtocol
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
@@ -46,6 +47,8 @@ jsonTemplates = { 'settings': defUserSettings, \
     'log': [], 'chat': [], 'news': [], 'cluster': [], 'status': {}, \
     'chatUsers': {} }
 
+app = None
+lastSpotSent = None
 
 @asyncio.coroutine
 def checkRecaptcha( response ):
@@ -434,7 +437,7 @@ def activeUsersHandler(request):
         au = {}
     au = { k : v for k, v in au.items() \
             if nowTs - v['ts'] < 120 }
-    au[replace0(data['user'])] = { 'chat': data['chat'], 'ts': nowTs, \
+    au[data['user']] = { 'chat': data['chat'], 'ts': nowTs, \
             'admin': data['user'] in stationAdmins, \
             'typing': data['typing'] }
     with open( auPath, 'w' ) as f:
@@ -535,7 +538,8 @@ def chatHandler(request):
     data = yield from request.json()
     stationPath = getStationPath( data['station'] )
     stationSettings = loadJSON( stationPath + '/settings.json' )
-    chatAdmins = stationSettings['chatAdmins'] + [ stationSettings['admin'], ]
+    chatAdmins = stationSettings['chatAdmins'] + \
+            [ stationSettings['admin'], ]
     admin = 'from' in data and data['from'] in chatAdmins
     if 'clear' in data or 'delete' in data:
         callsign = decodeToken( data )
@@ -553,7 +557,8 @@ def chatHandler(request):
         if 'delete' in data:
             chat = [ x for x in chat if x['ts'] != data['delete'] ]
         else:
-            msg = { 'user': replace0( data['from'] ), 'text': data['text'], \
+            msg = { 'user': data['from'], \
+                    'text': data['text'], \
                     'admin': admin, 'ts': time.time() }
             msg['date'], msg['time'] = dtFmt( datetime.utcnow() )
             if 'name' in data:
@@ -564,6 +569,38 @@ def chatHandler(request):
     with open( chatPath, 'w' ) as f:
         json.dump( chat, f, ensure_ascii = False )
     return web.Response( text = 'OK' )
+
+
+@asyncio.coroutine
+def sendSpotHandler(request):
+    global lastSpotSent
+    data = yield from request.json()
+    now = datetime.now().timestamp()
+    response = { 'sent': False, 
+            'secondsLeft': conf.getint( 'cluster', 'spotInterval' ) }
+    if not lastSpotSent or now - lastSpotSent > response['secondsLeft']:
+        lastSpotSent = now
+        protocol = yield from  clusterProtocol.connect( app.loop, \
+            call = data['userCS'], 
+            host = conf.get( 'cluster', 'host' ),
+            port = conf.get( 'cluster', 'port' ) )
+
+        def sendSpot():
+            protocol.write( 'dx ' + data['freq'] + ' ' + data['cs'] + ' ' + \
+                data['info'] )
+            response['sent'] = True
+            protocol.close()
+
+        if protocol:
+            logging.debug( 'Protocol connected' )
+            protocol.onLoggedIn.append( sendSpot )
+            yield from protocol.waitDisconnected()
+            if not response['sent']:
+                response['reply'] = protocol.latestReply
+    else:
+        response['secondsLeft'] -= now - lastSpotSent
+    return web.json_response( response )
+ 
  
 if __name__ == '__main__':
     app = web.Application( client_max_size = 10 * 1024 ** 2 )
@@ -580,6 +617,7 @@ if __name__ == '__main__':
             passwordRecoveryRequestHandler )
     app.router.add_post('/aiohttp/contact', contactHandler )
     app.router.add_post('/aiohttp/userData', userDataHandler )
+    app.router.add_post('/aiohttp/sendSpot', sendSpotHandler )
     db.verbose = True
     asyncio.async( db.connect() )
 
