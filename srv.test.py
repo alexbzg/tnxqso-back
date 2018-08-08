@@ -6,7 +6,7 @@ import argparse, asyncio, logging, logging.handlers, aiohttp, jwt, os, base64, \
 from datetime import datetime
 from aiohttp import web
 from common import siteConf, loadJSON, appRoot, startLogging, \
-        createFtpUser, dtFmt, tzOffset
+        createFtpUser, setFtpPasswd, dtFmt, tzOffset
 from tqdb import DBConn, spliceParams
 import clusterProtocol
 from email.mime.text import MIMEText
@@ -309,6 +309,7 @@ def userSettingsHandler(request):
     else:
         yield from db.paramUpdate( 'users', { 'callsign': callsign }, \
             spliceParams( data, ( 'email', 'password' ) ) )
+        setFtpPasswd( callsign, data['password'], test = args.test )
     return web.Response( text = 'OK' )
 
 @asyncio.coroutine

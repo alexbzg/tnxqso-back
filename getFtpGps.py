@@ -61,10 +61,12 @@ def main():
                         status['date'], status['time'] = dtFmt( dt )    
                         status['year'] = dt.year
                         status['ts'] = ts
-                        status['location'] = [ data[1], data[2] ]
+                        status['location'] = [ float(data[1]), float(data[2] ) ]
                         status['loc'] = qth( data[1], data[2] )
                         if status['loc'] in rafa:
                             status['rafa'] = rafa[status['loc']]
+                        else:
+                            status['rafa'] = None
                         status['speed'] = float( data[6] )
                         dt_ = datetime.utcnow()
                         #dt_.replace( tzinfo = timezone.utc )
@@ -73,6 +75,10 @@ def main():
                         #status['year_'] = dt_.year
                         with open( statusPath, 'w' ) as f:
                             json.dump( status, f, ensure_ascii = False )
+                for file in os.listdir( ftpPath ):
+                    filePath = os.path.join( ftpPath, file )
+                    if os.path.isfile( filePath ):
+                        os.unlink( filePath )
 
 loop = asyncio.get_event_loop()
 loop.run_until_complete( main() )

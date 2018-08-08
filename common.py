@@ -56,13 +56,18 @@ def startLogging( type, level = logging.DEBUG ):
 def createFtpUser( user, passwd, test = False ):
     conf = siteConf()
     testPfx = '_test' if test else ''
+    setFtpPasswd( user, passwd, test )
+    ftpPath = conf.get( 'web', 'root' + testPfx ) + '/ftp/' + user
+    os.makedirs( ftpPath )
+    os.chmod( ftpPath, 0o775 )
+
+def setFtpPasswd( user, passwd, test = False ):
+    conf = siteConf()
+    testPfx = '_test' if test else ''
     ht = HtpasswdFile( conf.get( 'ftp', 'passwd' + testPfx ), 
             default_scheme = "md5_crypt" )
     ht.set_password( user, passwd )
     ht.save()
-    ftpPath = conf.get( 'web', 'root' + testPfx ) + '/ftp/' + user
-    os.makedirs( ftpPath )
-    os.chmod( ftpPath, 0o775 )
 
 def dtFmt( dt ):
     return dt.strftime( '%d %b' ).lower(), dt.strftime( '%H:%Mz' )
