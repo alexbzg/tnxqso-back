@@ -509,10 +509,13 @@ def logHandler(request):
         dt = datetime.strptime( qso['ts'], "%Y-%m-%d %H:%M:%S" )
         qso['date'], qso['time'] = dtFmt( dt )
         sameFl = True
-        for key in qso:
-            if not key in ('ts', 'rda', 'wff') and qso[key] != log[0][key]:
-                sameFl = False
-                break
+        if log:
+            for key in qso:
+                if not key in ('ts', 'rda', 'wff') and qso[key] != log[0][key]:
+                    sameFl = False
+                    break
+        else:
+            sameFl = False
         if not sameFl:
             if qso['rda']:
                 qso['rda'] = qso['rda'].upper()
