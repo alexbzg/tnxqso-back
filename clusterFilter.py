@@ -20,7 +20,8 @@ for root in roots:
     for station in [str(x) for x in pathlib.Path( stationsPath ).iterdir() \
             if x.is_dir() ]:
         settings = loadJSON( station + '/settings.json' )
-        if settings['enable']['cluster'] and settings['clusterCallsigns']:            
+        if settings and 'clusterCallsigns' in settings and \
+                settings['enable']['cluster'] and settings['clusterCallsigns']:            
             reCS = []
             for cs in settings['clusterCallsigns']:
                 reCS.append( re.compile( '^' + cs.replace( '*', '.*' ) + '$' ) )
