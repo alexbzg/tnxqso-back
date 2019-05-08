@@ -46,6 +46,7 @@ for root in roots:
                                 break
                         stationDX.insert( idx, item )
                         idx += 1
+                        break
             if len( stationDX ) > 20:
                 stationDX = stationDX[:20]
             with open( stationDXpath, 'w' ) as f:
