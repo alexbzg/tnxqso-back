@@ -40,11 +40,12 @@ for root in roots:
                     break
                 for r in reCS:
                     if r.match( item['cs'] ):
+                        _item = dict(item)
                         for rh in reHl:
-                            if rh.match( item['cs'] ):
-                                item['highlight'] = True
+                            if rh.match( _item['cs'] ):
+                                _item['highlight'] = True
                                 break
-                        stationDX.insert( idx, item )
+                        stationDX.insert( idx, _item )
                         idx += 1
                         break
             if len( stationDX ) > 20:

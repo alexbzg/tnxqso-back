@@ -106,12 +106,12 @@ def passwordRecoveryRequestHandler(request):
                         { 'callsign': data['login'], 'time': time.time() }, \
                         secret, algorithm='HS256' ).decode('utf-8')
                     text = 'Click on this link to recover your tnxqso.com ' + \
-                             'password:' + webAddress + \
+                             'password: ' + webAddress + \
                              '/#/changePassword?token=' + token + """
 If you did not request password recovery just ignore this message. 
 The link above will be valid for 1 hour.
 
-tnxqso.com support"""
+TNXQSO.com support"""
                     sendEmail( text = text, fr = conf.get( 'email', 'address' ), \
                         to = userData['email'], \
                         subject = "tnxqso.com password recovery" )
@@ -426,12 +426,16 @@ def newsHandler(request):
 @asyncio.coroutine
 def activeUsersHandler(request):
     data = yield from request.json()
-    stationPath = getStationPath( data['station'] )
+    admins = []
+    if 'station' in data:
+        stationPath = getStationPath( data['station'] )
+        stationSettings = loadJSON( stationPath + '/settings.json' )
+        if not stationSettings:
+            return web.HTTPBadRequest( text = 'This station was deleted or moved' )
+        admins = stationSettings['chatAdmins'] + [ stationSettings['admin'] ]
+    else:
+        admins = siteAdmins
     auPath = stationPath + '/activeUsers.json'
-    stationSettings = loadJSON( stationPath + '/settings.json' )
-    if not stationSettings:
-        return web.HTTPBadRequest( text = 'This station was deleted or moved' )
-    stationAdmins = stationSettings['chatAdmins'] + [ stationSettings['admin'] ]
     au = loadJSON( auPath )
     nowTs = int( datetime.now().timestamp() ) 
     if not au:
@@ -439,12 +443,12 @@ def activeUsersHandler(request):
     au = { k : v for k, v in au.items() \
             if nowTs - v['ts'] < 120 }
     au[data['user']] = { 'chat': data['chat'], 'ts': nowTs, \
-            'admin': data['user'] in stationAdmins, \
+            'admin': data['user'] in admins, \
+            'station': data['station'] if 'station' in data else None,\
             'typing': data['typing'] }
     with open( auPath, 'w' ) as f:
         json.dump( au, f, ensure_ascii = False )
     return web.Response( text = 'OK' )
-
 
 @asyncio.coroutine
 def trackHandler(request):

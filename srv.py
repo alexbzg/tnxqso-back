@@ -106,12 +106,12 @@ def passwordRecoveryRequestHandler(request):
                         { 'callsign': data['login'], 'time': time.time() }, \
                         secret, algorithm='HS256' ).decode('utf-8')
                     text = 'Click on this link to recover your tnxqso.com ' + \
-                             'password:' + webAddress + \
+                             'password: ' + webAddress + \
                              '/#/changePassword?token=' + token + """
 If you did not request password recovery just ignore this message. 
 The link above will be valid for 1 hour.
 
-tnxqso.com support"""
+TNXQSO.com support"""
                     sendEmail( text = text, fr = conf.get( 'email', 'address' ), \
                         to = userData['email'], \
                         subject = "tnxqso.com password recovery" )
