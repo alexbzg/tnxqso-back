@@ -426,16 +426,15 @@ def newsHandler(request):
 @asyncio.coroutine
 def activeUsersHandler(request):
     data = yield from request.json()
-    admins = []
-    if 'station' in data:
+    admins = siteAdmins
+    station = data['station'] if 'station' in data else None
+    if station:
         stationPath = getStationPath( data['station'] )
         stationSettings = loadJSON( stationPath + '/settings.json' )
         if not stationSettings:
             return web.HTTPBadRequest( text = 'This station was deleted or moved' )
-        admins = stationSettings['chatAdmins'] + [ stationSettings['admin'] ]
-    else:
-        admins = siteAdmins
-    auPath = stationPath + '/activeUsers.json'
+        admins += stationSettings['chatAdmins'] + [ stationSettings['admin'] ]
+    auPath = webRoot + '/activeUsers.json'
     au = loadJSON( auPath )
     nowTs = int( datetime.now().timestamp() ) 
     if not au:
@@ -444,7 +443,7 @@ def activeUsersHandler(request):
             if nowTs - v['ts'] < 120 }
     au[data['user']] = { 'chat': data['chat'], 'ts': nowTs, \
             'admin': data['user'] in admins, \
-            'station': data['station'] if 'station' in data else None,\
+            'station': station,\
             'typing': data['typing'] }
     with open( auPath, 'w' ) as f:
         json.dump( au, f, ensure_ascii = False )
@@ -544,19 +543,24 @@ def replace0( val ):
 @asyncio.coroutine
 def chatHandler(request):
     data = yield from request.json()
-    stationPath = getStationPath( data['station'] )
-    stationSettings = loadJSON( stationPath + '/settings.json' )
-    chatAdmins = stationSettings['chatAdmins'] + \
-            [ stationSettings['admin'], ]
-    admin = 'from' in data and data['from'] in chatAdmins
+    admins = siteAdmins
+    chatPath = ''
+    station = data['station'] if 'station' in data else None
+    if station:
+        stationPath = getStationPath( data['station'] )
+        stationSettings = loadJSON( stationPath + '/settings.json' )
+        admins += stationSettings['chatAdmins'] + [ stationSettings['admin'], ]
+        chatPath = stationPath + '/chat.json'
+    else:
+        chatPath = webRoot + '/talks.json'
+    admin = 'from' in data and data['from'] in admins
     if 'clear' in data or 'delete' in data:
         callsign = decodeToken( data )
         if not isinstance( callsign, str ):
             return callsign
-        if not callsign in chatAdmins and not callsign in siteAdmins:
+        if not callsign in admins:
             return web.HTTPUnauthorized( \
                 text = 'You must be logged in as station or site admin' )
-    chatPath = stationPath + '/chat.json'
     chat = []
     if not 'clear' in data:
         chat = loadJSON( chatPath )
