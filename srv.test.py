@@ -434,17 +434,22 @@ def activeUsersHandler(request):
         if not stationSettings:
             return web.HTTPBadRequest( text = 'This station was deleted or moved' )
         admins += stationSettings['chatAdmins'] + [ stationSettings['admin'] ]
-    auPath = webRoot + '/activeUsers.json'
+    auPath = webRoot + '/js/activeUsers.json'
     au = loadJSON( auPath )
     nowTs = int( datetime.now().timestamp() ) 
     if not au:
         au = {}
     au = { k : v for k, v in au.items() \
             if nowTs - v['ts'] < 120 }
-    au[data['user']] = { 'chat': data['chat'], 'ts': nowTs, \
-            'admin': data['user'] in admins, \
+    logging.debug('user ' + data['user'])
+    logging.debug('admins: ' + str(admins))
+    au[data['user']] = {\
+            'chat': data['chat'],\
+            'ts': nowTs,\
+            'admin': data['user'].lower() in admins,\
             'station': station,\
-            'typing': data['typing'] }
+            'typing': data['typing']\
+            }
     with open( auPath, 'w' ) as f:
         json.dump( au, f, ensure_ascii = False )
     return web.Response( text = 'OK' )
@@ -552,8 +557,8 @@ def chatHandler(request):
         admins += stationSettings['chatAdmins'] + [ stationSettings['admin'], ]
         chatPath = stationPath + '/chat.json'
     else:
-        chatPath = webRoot + '/talks.json'
-    admin = 'from' in data and data['from'] in admins
+        chatPath = webRoot + '/js/talks.json'
+    admin = 'from' in data and data['from'].lower() in admins
     if 'clear' in data or 'delete' in data:
         callsign = decodeToken( data )
         if not isinstance( callsign, str ):
