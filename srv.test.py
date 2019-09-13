@@ -426,14 +426,12 @@ def newsHandler(request):
 @asyncio.coroutine
 def activeUsersHandler(request):
     data = yield from request.json()
-    admins = siteAdmins
     station = data['station'] if 'station' in data else None
     if station:
         stationPath = getStationPath( data['station'] )
         stationSettings = loadJSON( stationPath + '/settings.json' )
         if not stationSettings:
             return web.HTTPBadRequest( text = 'This station was deleted or moved' )
-        admins += stationSettings['chatAdmins'] + [ stationSettings['admin'] ]
     auPath = webRoot + '/js/activeUsers.json'
     au = loadJSON( auPath )
     nowTs = int( datetime.now().timestamp() ) 
@@ -441,12 +439,9 @@ def activeUsersHandler(request):
         au = {}
     au = { k : v for k, v in au.items() \
             if nowTs - v['ts'] < 120 }
-    logging.debug('user ' + data['user'])
-    logging.debug('admins: ' + str(admins))
     au[data['user']] = {\
             'chat': data['chat'],\
             'ts': nowTs,\
-            'admin': data['user'].lower() in admins,\
             'station': station,\
             'typing': data['typing']\
             }
@@ -548,21 +543,24 @@ def replace0( val ):
 @asyncio.coroutine
 def chatHandler(request):
     data = yield from request.json()
-    admins = siteAdmins
+    admin = False
+    callsign = decodeToken( data )
     chatPath = ''
     station = data['station'] if 'station' in data else None
     if station:
         stationPath = getStationPath( data['station'] )
         stationSettings = loadJSON( stationPath + '/settings.json' )
-        admins += stationSettings['chatAdmins'] + [ stationSettings['admin'], ]
+        admins = stationSettings['chatAdmins'] + [ stationSettings['admin'], ]
+        admin = 'from' in data and data['from'].lower() in admins
         chatPath = stationPath + '/chat.json'
     else:
         chatPath = webRoot + '/js/talks.json'
-    admin = 'from' in data and data['from'].lower() in admins
+        admin = isinstance( callsign, str ) and callsign in siteAdmins
     if 'clear' in data or 'delete' in data:
         callsign = decodeToken( data )
         if not isinstance( callsign, str ):
             return callsign
+        admins = siteAdmins + [stationSettings['admin'],] if station else siteAdmins
         if not callsign in admins:
             return web.HTTPUnauthorized( \
                 text = 'You must be logged in as station or site admin' )
