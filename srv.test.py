@@ -550,7 +550,8 @@ def chatHandler(request):
     if station:
         stationPath = getStationPath( data['station'] )
         stationSettings = loadJSON( stationPath + '/settings.json' )
-        admins = stationSettings['chatAdmins'] + [ stationSettings['admin'], ]
+        admins = [x.lower() for x in\
+            stationSettings['chatAdmins'] + [ stationSettings['admin'], ]]
         admin = 'from' in data and data['from'].lower() in admins
         chatPath = stationPath + '/chat.json'
     else:

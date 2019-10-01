@@ -426,14 +426,12 @@ def newsHandler(request):
 @asyncio.coroutine
 def activeUsersHandler(request):
     data = yield from request.json()
-    admins = siteAdmins
     station = data['station'] if 'station' in data else None
     if station:
         stationPath = getStationPath( data['station'] )
         stationSettings = loadJSON( stationPath + '/settings.json' )
         if not stationSettings:
             return web.HTTPBadRequest( text = 'This station was deleted or moved' )
-        admins += stationSettings['chatAdmins'] + [ stationSettings['admin'] ]
     auPath = webRoot + '/js/activeUsers.json'
     au = loadJSON( auPath )
     nowTs = int( datetime.now().timestamp() ) 
@@ -441,12 +439,9 @@ def activeUsersHandler(request):
         au = {}
     au = { k : v for k, v in au.items() \
             if nowTs - v['ts'] < 120 }
-    logging.debug('user ' + data['user'])
-    logging.debug('admins: ' + str(admins))
     au[data['user']] = {\
             'chat': data['chat'],\
             'ts': nowTs,\
-            'admin': data['user'].lower() in admins,\
             'station': station,\
             'typing': data['typing']\
             }
@@ -555,7 +550,8 @@ def chatHandler(request):
     if station:
         stationPath = getStationPath( data['station'] )
         stationSettings = loadJSON( stationPath + '/settings.json' )
-        admins = stationSettings['chatAdmins'] + [ stationSettings['admin'], ]
+        admins = [x.lower() for x in\
+            stationSettings['chatAdmins'] + [ stationSettings['admin'], ]]
         admin = 'from' in data and data['from'].lower() in admins
         chatPath = stationPath + '/chat.json'
     else:
