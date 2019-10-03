@@ -12,6 +12,7 @@ import clusterProtocol
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
+import requests
 
 
 parser = argparse.ArgumentParser(description="tnxqso backend aiohttp server")
@@ -46,6 +47,17 @@ if not defUserSettings:
 jsonTemplates = { 'settings': defUserSettings, \
     'log': [], 'chat': [], 'news': [], 'cluster': [], 'status': {}, \
     'chatUsers': {} }
+
+RAFA_LOCS = {}
+with open(appRoot + '/rafa.csv', 'r') as f_rafa:
+    for line in f_rafa.readlines():
+        data = line.strip('\r\n ').split(';')
+        locators = data[3].split(',')
+        for locator in locators:
+            if locator in RAFA_LOCS:
+                RAFA_LOCS[locator] += ' ' + data[1]
+            else:
+                RAFA_LOCS[locator] = data[1]
 
 app = None
 lastSpotSent = None
@@ -348,6 +360,18 @@ def sind( d ):
 def cosd( d ):
     return math.cos( math.radians(d) )
 
+def rda(location):
+    rsp = requests.get('https://r1cf.ru/geoserver/cite/wfs?SERVICE=WFS&REQUEST=GetFeature&TypeName=RDA_FULL_R&VERSION=1.1.0&CQL_FILTER=INTERSECTS%28the_geom,POINT%28'\
+        + str(location[1]) + '%20'+ str(location[0]) + '%29%29', verify=False)
+    tag = '<cite:RDA>'
+    data = rsp.text
+    if tag in data:
+        start = data.find(tag) + len(tag)
+        rda = data[start:start + 5]
+        return rda
+    else:
+        return None
+
 @asyncio.coroutine
 def locationHandler( request ):
     newData = yield from request.json()
@@ -369,10 +393,13 @@ def locationHandler( request ):
     data['rafa'] = newData['rafa'] if 'rafa' in newData else None
     data['rda'] = newData['rda'] if 'rda' in newData else None
     data['wff'] = newData['wff'] if 'wff' in newData else None
-    data['userFields'] = newData['userFields']
+    data['userFields'] = newData['userFields'] if 'userFields' in newData else None
     if 'online' in newData:
         data['online'] = newData['online']
     if 'location' in newData and newData['location']:
+        data['loc'] = locator(newData['location'])
+        data['rda'] = rda(newData['location'])
+        data['rafa'] = RAFA_LOCS[data['loc']] if data['loc'] in RAFA_LOCS else None
         if 'comments' in newData:
             data['comments'] = newData['comments']
         if 'location' in data and data['location']:
@@ -396,6 +423,26 @@ def locationHandler( request ):
     with open( fp, 'w' ) as f:
         json.dump( data, f, ensure_ascii = False )
     return web.Response( text = 'OK' )
+
+def locator(location):
+    lat = location[1]
+    lng = location[0]
+    qth = ""
+    lat += 90
+    lng += 180
+    lat = lat / 10 + 0.0000001
+    lng = lng / 20 + 0.0000001
+    qth += chr(65 + int(lng))
+    qth += chr(65 + int(lat))
+    lat = 10 * (lat - math.trunc(lat))
+    lng = 10 * (lng - math.trunc(lng))
+    qth += chr(48 + int(lng))
+    qth += chr(48 + int(lat))
+    lat = 24 * (lat - math.trunc(lat))
+    lng = 24 * (lng - math.trunc(lng))
+    qth += chr(65 + int(lng))
+    qth += chr(65 + int(lat))
+    return qth
 
 @asyncio.coroutine
 def newsHandler(request):
