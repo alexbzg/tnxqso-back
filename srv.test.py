@@ -389,11 +389,14 @@ def locationHandler( request ):
     data['ts'] = int( dtUTC.timestamp() + tzOffset() ) 
     data['date'], data['time'] = dtFmt( dtUTC )    
     data['year'] = dtUTC.year
-    data['loc'] = newData['loc'] if 'loc' in newData else None
-    data['rafa'] = newData['rafa'] if 'rafa' in newData else None
-    data['rda'] = newData['rda'] if 'rda' in newData else None
-    data['wff'] = newData['wff'] if 'wff' in newData else None
-    data['userFields'] = newData['userFields'] if 'userFields' in newData else None
+    if 'loc' in newData:
+        data['loc'] = newData['loc']     
+    if 'rafa' in newData:
+        data['rafa'] = newData['rafa']     
+    if 'rda' in newData:
+        data['rda'] = newData['rda']     
+    if 'userFields' in newData:
+        data['userFields'] = newData['userFields']     
     if 'online' in newData:
         data['online'] = newData['online']
     if 'location' in newData and newData['location']:
