@@ -362,7 +362,7 @@ def cosd( d ):
 
 def rda(location):
     rsp = requests.get('https://r1cf.ru/geoserver/cite/wfs?SERVICE=WFS&REQUEST=GetFeature&TypeName=RDA_FULL_R&VERSION=1.1.0&CQL_FILTER=INTERSECTS%28the_geom,POINT%28'\
-        + str(location[1]) + '%20'+ str(location[0]) + '%29%29', verify=False)
+        + str(location[0]) + '%20'+ str(location[1]) + '%29%29', verify=False)
     tag = '<cite:RDA>'
     data = rsp.text
     if tag in data:
@@ -372,9 +372,18 @@ def rda(location):
     else:
         return None
 
+def parseLocation(location):
+    data = {}
+    data['loc'] = locator(location)
+    data['rda'] = rda(location)
+    data['rafa'] = RAFA_LOCS[data['loc']] if data['loc'] in RAFA_LOCS else None
+    return web.json_response(data)
+
 @asyncio.coroutine
 def locationHandler( request ):
     newData = yield from request.json()
+    if ('token' not in newData or not newData['token']) and 'location' in newData:
+        return parseLocation(newData['location'])
     callsign = decodeToken( newData )
     if not isinstance( callsign, str ):
         return callsign
@@ -425,11 +434,11 @@ def locationHandler( request ):
                     / 3600 )
     with open( fp, 'w' ) as f:
         json.dump( data, f, ensure_ascii = False )
-    return web.Response( text = 'OK' )
+    return web.json_response(data)
 
 def locator(location):
-    lat = location[1]
-    lng = location[0]
+    lat = location[0]
+    lng = location[1]
     qth = ""
     lat += 90
     lng += 180
