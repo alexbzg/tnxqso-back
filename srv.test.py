@@ -24,7 +24,9 @@ webRoot = conf.get( 'web', 'root_test' if args.test else 'root' )
 webAddress = conf.get( 'web', 'address_test' if args.test else 'address' )
 siteAdmins = conf.get( 'web', 'admins' ).split( ' ' )
 
-startLogging( 'srv_test' if args.test else 'srv' )
+startLogging(\
+    'srv_test' if args.test else 'srv',\
+    logging.DEBUG if args.test else logging.INFO)
 logging.debug( "restart" )
 
 db = DBConn( conf.items( 'db_test' if args.test else 'db' ) )
@@ -485,6 +487,8 @@ def newsHandler(request):
 @asyncio.coroutine
 def activeUsersHandler(request):
     data = yield from request.json()
+    if 'user' not in data:
+        return web.Response( text = 'OK' )
     station = data['station'] if 'station' in data else None
     if station:
         stationPath = getStationPath( data['station'] )
@@ -498,14 +502,18 @@ def activeUsersHandler(request):
         au = {}
     au = { k : v for k, v in au.items() \
             if nowTs - v['ts'] < 120 }
-    au[data['user']] = {\
-            'chat': data['chat'],\
-            'ts': nowTs,\
-            'station': station,\
-            'typing': data['typing']\
-            }
-    with open( auPath, 'w' ) as f:
-        json.dump( au, f, ensure_ascii = False )
+    try:
+        au[data['user']] = {\
+                'chat': data['chat'],\
+                'ts': nowTs,\
+                'station': station,\
+                'typing': data['typing']\
+                }
+        with open( auPath, 'w' ) as f:
+            json.dump( au, f, ensure_ascii = False )
+    except Exception:
+        logging.exception('Exception in activeUserHandler')
+        logging.error(data)
     return web.Response( text = 'OK' )
 
 @asyncio.coroutine

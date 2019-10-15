@@ -12,6 +12,7 @@ import clusterProtocol
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
+import requests
 
 
 parser = argparse.ArgumentParser(description="tnxqso backend aiohttp server")
@@ -23,7 +24,9 @@ webRoot = conf.get( 'web', 'root_test' if args.test else 'root' )
 webAddress = conf.get( 'web', 'address_test' if args.test else 'address' )
 siteAdmins = conf.get( 'web', 'admins' ).split( ' ' )
 
-startLogging( 'srv_test' if args.test else 'srv' )
+startLogging(\
+    'srv_test' if args.test else 'srv',\
+    logging.DEBUG if args.test else logging.INFO)
 logging.debug( "restart" )
 
 db = DBConn( conf.items( 'db_test' if args.test else 'db' ) )
@@ -46,6 +49,17 @@ if not defUserSettings:
 jsonTemplates = { 'settings': defUserSettings, \
     'log': [], 'chat': [], 'news': [], 'cluster': [], 'status': {}, \
     'chatUsers': {} }
+
+RAFA_LOCS = {}
+with open(appRoot + '/rafa.csv', 'r') as f_rafa:
+    for line in f_rafa.readlines():
+        data = line.strip('\r\n ').split(';')
+        locators = data[3].split(',')
+        for locator in locators:
+            if locator in RAFA_LOCS:
+                RAFA_LOCS[locator] += ' ' + data[1]
+            else:
+                RAFA_LOCS[locator] = data[1]
 
 app = None
 lastSpotSent = None
@@ -348,9 +362,30 @@ def sind( d ):
 def cosd( d ):
     return math.cos( math.radians(d) )
 
+def rda(location):
+    rsp = requests.get('https://r1cf.ru/geoserver/cite/wfs?SERVICE=WFS&REQUEST=GetFeature&TypeName=RDA_FULL_R&VERSION=1.1.0&CQL_FILTER=INTERSECTS%28the_geom,POINT%28'\
+        + str(location[0]) + '%20'+ str(location[1]) + '%29%29', verify=False)
+    tag = '<cite:RDA>'
+    data = rsp.text
+    if tag in data:
+        start = data.find(tag) + len(tag)
+        rda = data[start:start + 5]
+        return rda
+    else:
+        return None
+
+def parseLocation(location):
+    data = {}
+    data['loc'] = locator(location)
+    data['rda'] = rda(location)
+    data['rafa'] = RAFA_LOCS[data['loc']] if data['loc'] in RAFA_LOCS else None
+    return web.json_response(data)
+
 @asyncio.coroutine
 def locationHandler( request ):
     newData = yield from request.json()
+    if ('token' not in newData or not newData['token']) and 'location' in newData:
+        return parseLocation(newData['location'])
     callsign = decodeToken( newData )
     if not isinstance( callsign, str ):
         return callsign
@@ -365,14 +400,20 @@ def locationHandler( request ):
     data['ts'] = int( dtUTC.timestamp() + tzOffset() ) 
     data['date'], data['time'] = dtFmt( dtUTC )    
     data['year'] = dtUTC.year
-    data['loc'] = newData['loc'] if 'loc' in newData else None
-    data['rafa'] = newData['rafa'] if 'rafa' in newData else None
-    data['rda'] = newData['rda'] if 'rda' in newData else None
-    data['wff'] = newData['wff'] if 'wff' in newData else None
-    data['userFields'] = newData['userFields']
+    if 'loc' in newData:
+        data['loc'] = newData['loc']     
+    if 'rafa' in newData:
+        data['rafa'] = newData['rafa']     
+    if 'rda' in newData:
+        data['rda'] = newData['rda']     
+    if 'userFields' in newData:
+        data['userFields'] = newData['userFields']     
     if 'online' in newData:
         data['online'] = newData['online']
     if 'location' in newData and newData['location']:
+        data['loc'] = locator(newData['location'])
+        data['rda'] = rda(newData['location'])
+        data['rafa'] = RAFA_LOCS[data['loc']] if data['loc'] in RAFA_LOCS else None
         if 'comments' in newData:
             data['comments'] = newData['comments']
         if 'location' in data and data['location']:
@@ -395,7 +436,27 @@ def locationHandler( request ):
                     / 3600 )
     with open( fp, 'w' ) as f:
         json.dump( data, f, ensure_ascii = False )
-    return web.Response( text = 'OK' )
+    return web.json_response(data)
+
+def locator(location):
+    lat = location[0]
+    lng = location[1]
+    qth = ""
+    lat += 90
+    lng += 180
+    lat = lat / 10 + 0.0000001
+    lng = lng / 20 + 0.0000001
+    qth += chr(65 + int(lng))
+    qth += chr(65 + int(lat))
+    lat = 10 * (lat - math.trunc(lat))
+    lng = 10 * (lng - math.trunc(lng))
+    qth += chr(48 + int(lng))
+    qth += chr(48 + int(lat))
+    lat = 24 * (lat - math.trunc(lat))
+    lng = 24 * (lng - math.trunc(lng))
+    qth += chr(65 + int(lng))
+    qth += chr(65 + int(lat))
+    return qth
 
 @asyncio.coroutine
 def newsHandler(request):
@@ -426,6 +487,8 @@ def newsHandler(request):
 @asyncio.coroutine
 def activeUsersHandler(request):
     data = yield from request.json()
+    if 'user' not in data:
+        return web.Response( text = 'OK' )
     station = data['station'] if 'station' in data else None
     if station:
         stationPath = getStationPath( data['station'] )
@@ -439,14 +502,18 @@ def activeUsersHandler(request):
         au = {}
     au = { k : v for k, v in au.items() \
             if nowTs - v['ts'] < 120 }
-    au[data['user']] = {\
-            'chat': data['chat'],\
-            'ts': nowTs,\
-            'station': station,\
-            'typing': data['typing']\
-            }
-    with open( auPath, 'w' ) as f:
-        json.dump( au, f, ensure_ascii = False )
+    try:
+        au[data['user']] = {\
+                'chat': data['chat'],\
+                'ts': nowTs,\
+                'station': station,\
+                'typing': data['typing']\
+                }
+        with open( auPath, 'w' ) as f:
+            json.dump( au, f, ensure_ascii = False )
+    except Exception:
+        logging.exception('Exception in activeUserHandler')
+        logging.error(data)
     return web.Response( text = 'OK' )
 
 @asyncio.coroutine

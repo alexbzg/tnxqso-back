@@ -68,17 +68,17 @@ def main():
                         else:
                             status['rafa'] = None
                         status['speed'] = float( data[6] )
-                        dt_ = datetime.utcnow()
+                        #dt_ = datetime.utcnow()
                         #dt_.replace( tzinfo = timezone.utc )
                         #status['ts_'] = dt_.timestamp() 
                         #status['date_'], status['time_'] = dtFmt( dt_ )    
                         #status['year_'] = dt_.year
                         with open( statusPath, 'w' ) as f:
                             json.dump( status, f, ensure_ascii = False )
-                for file in os.listdir( ftpPath ):
-                    filePath = os.path.join( ftpPath, file )
-                    if os.path.isfile( filePath ):
-                        os.unlink( filePath )
+#                for file in os.listdir( ftpPath ):
+#                    filePath = os.path.join( ftpPath, file )
+#                    if os.path.isfile( filePath ):
+#                        os.unlink( filePath )
 
 loop = asyncio.get_event_loop()
 loop.run_until_complete( main() )
