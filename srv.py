@@ -363,14 +363,17 @@ def cosd( d ):
     return math.cos( math.radians(d) )
 
 def rda(location):
-    rsp = requests.get('https://r1cf.ru/geoserver/cite/wfs?SERVICE=WFS&REQUEST=GetFeature&TypeName=RDA_FULL_R&VERSION=1.1.0&CQL_FILTER=INTERSECTS%28the_geom,POINT%28'\
-        + str(location[0]) + '%20'+ str(location[1]) + '%29%29', verify=False)
+    rsp = requests.get('https://r1cf.ru/geoserver/cite/wfs?SERVICE=WFS&REQUEST=GetFeature&TypeName=RDA_FULL_R&VERSION=1.1.0&CQL_FILTER=DWITHIN%28the_geom,POINT%28'\
+        + str(location[0]) + '%20'+ str(location[1]) + '%29,0.002,kilometers%29', verify=False)
     tag = '<cite:RDA>'
     data = rsp.text
-    if tag in data:
+    rdas = []
+    while tag in data:
         start = data.find(tag) + len(tag)
-        rda = data[start:start + 5]
-        return rda
+        rdas.append(data[start:start + 5])
+        data = data[start+6:]
+    if rdas:
+        return ' '.join(rdas)
     else:
         return None
 

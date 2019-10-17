@@ -364,7 +364,7 @@ def cosd( d ):
 
 def rda(location):
     rsp = requests.get('https://r1cf.ru/geoserver/cite/wfs?SERVICE=WFS&REQUEST=GetFeature&TypeName=RDA_FULL_R&VERSION=1.1.0&CQL_FILTER=DWITHIN%28the_geom,POINT%28'\
-        + str(location[0]) + '%20'+ str(location[1]) + '%29,0.0002,kilometers%29', verify=False)
+        + str(location[0]) + '%20'+ str(location[1]) + '%29,0.002,kilometers%29', verify=False)
     tag = '<cite:RDA>'
     data = rsp.text
     rdas = []
