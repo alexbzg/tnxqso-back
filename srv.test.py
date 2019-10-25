@@ -400,7 +400,7 @@ def locationHandler( request ):
     if not 'locTs' in data and 'ts' in data:
         data['locTs'] = data['ts']
     dtUTC = datetime.utcnow()
-    data['ts'] = int( dtUTC.timestamp() + tzOffset() ) 
+    data['ts'] = int(time.time()) 
     data['date'], data['time'] = dtFmt( dtUTC )    
     data['year'] = dtUTC.year
     if 'loc' in newData:
@@ -413,6 +413,8 @@ def locationHandler( request ):
         data['userFields'] = newData['userFields']     
     if 'online' in newData:
         data['online'] = newData['online']
+    if 'freq' in newData and newData['freq']:
+        data['freq'] = {'value': newData['freq'], 'ts': data['ts']}
     if 'location' in newData and newData['location']:
         data['loc'] = locator(newData['location'])
         data['rda'] = rda(newData['location'])
@@ -590,6 +592,15 @@ def logHandler(request):
         else:
             sameFl = False
         if not sameFl:
+
+            statusPath = stationPath + '/status.json'
+            statusData = loadJSON(statusPath)
+            ts = dt.timestamp() + tzOffset()
+            if ('freq' not in statusData or statusData['freq']['ts'] < ts):
+                statusData['freq'] = {'value': qso['freq'], 'ts': ts} 
+                with open(statusPath, 'w' ) as f:
+                    json.dump(statusData, f, ensure_ascii = False )
+
             if qso['rda']:
                 qso['rda'] = qso['rda'].upper()
             if qso['wff']:
