@@ -362,26 +362,42 @@ def sind( d ):
 def cosd( d ):
     return math.cos( math.radians(d) )
 
-def rda(location):
-    rsp = requests.get('https://r1cf.ru/geoserver/cite/wfs?SERVICE=WFS&REQUEST=GetFeature&TypeName=RDA_FULL_R&VERSION=1.1.0&CQL_FILTER=DWITHIN%28the_geom,POINT%28'\
-        + str(location[0]) + '%20'+ str(location[1]) + '%29,0.0015,kilometers%29', verify=False)
-    tag = '<cite:RDA>'
-    data = rsp.text
-    rdas = []
-    while tag in data:
-        start = data.find(tag) + len(tag)
-        rdas.append(data[start:start + 5])
-        data = data[start+6:]
-    if rdas:
-        return ' '.join(rdas)
-    else:
-        return None
+def rda(location, strict=False):
+    url = 'https://r1cf.ru/geoserver/cite/wfs?SERVICE=WFS&REQUEST=GetFeature&TypeName=RDA_FULL_R&VERSION=1.1.0&CQL_FILTER={predi}%28the_geom,POINT%28{lat}%20{lng}%29{addParams}%29'
+    params = {
+        'predi': 'INTERSECTS' if strict else 'DWITHIN',\
+        'lat': location[0],\
+        'lng': location[1],\
+        'addParams': '' if strict else ',0.0015,kilometers'\
+        }
+    try:
+        rsp = requests.get(url.format_map(params), verify=False, timeout=(0.1, 1))
+        tag = '<cite:RDA>'
+        data = rsp.text
+        rdas = []
+        while tag in data:
+            start = data.find(tag) + len(tag)
+            rdas.append(data[start:start + 5])
+            data = data[start+6:]
+        if rdas:
+            return rdas[0] if strict else rdas
+        else:
+            return None
+
+    except requests.exceptions.Timeout:
+        return ['-----']
 
 def parseLocation(location):
     data = {}
     data['loc'] = locator(location)
-    data['rda'] = rda(location)
     data['rafa'] = RAFA_LOCS[data['loc']] if data['loc'] in RAFA_LOCS else None
+    all_rda = rda(location)
+    strict_rda = rda(location, strict=True)
+    data['rda'] = ' '.join(all_rda) if all_rda else None
+    data['rdaStrict'] = strict_rda
+    if all_rda and strict_rda:
+        data['rdaNear'] = ' '.join([x for x in all_rda if x != strict_rda or x == '-----'])
+
     return web.json_response(data)
 
 @asyncio.coroutine
@@ -417,7 +433,12 @@ def locationHandler( request ):
         data['freq'] = {'value': newData['freq'], 'ts': data['ts']}
     if 'location' in newData and newData['location']:
         data['loc'] = locator(newData['location'])
-        data['rda'] = rda(newData['location'])
+        all_rda = rda(newData['location'])
+        strict_rda = rda(newData['location'], strict=True)
+        data['rda'] = ' '.join(all_rda) if all_rda else None
+        data['rdaStrict'] = strict_rda
+        if all_rda and strict_rda:
+            data['rdaNear'] = ' '.join([x for x in all_rda if x != strict_rda or x == '-----'])
         data['rafa'] = RAFA_LOCS[data['loc']] if data['loc'] in RAFA_LOCS else None
         if 'comments' in newData:
             data['comments'] = newData['comments']
