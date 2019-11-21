@@ -404,11 +404,15 @@ def parseLocation(location):
 def locationHandler( request ):
     newData = yield from request.json()
     if ('token' not in newData or not newData['token']) and 'location' in newData:
+        logging.info('Location w/o token:' )
+        logging.info(newData)
         return parseLocation(newData['location'])
     callsign = decodeToken( newData )
     if not isinstance( callsign, str ):
         return callsign
     stationPath = yield from getStationPathByAdminCS( callsign )
+    logging.info('Location: ' + stationPath)
+    logging.info(newData)
     fp = stationPath + '/status.json'
     data = loadJSON( fp )
     if not data:
