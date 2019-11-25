@@ -615,14 +615,14 @@ def logHandler(request):
 
         if serverTs:
             qso['ts'] = serverTs
-            qsoIdx = [i for i in enumerate(log) if log[i]['ts'] == qso['ts']]
+            qsoIdx = [i[0] for i in enumerate(log) if i[1]['ts'] == qso['ts']]
             if qsoIdx:
                 log[qsoIdx[0]] = qso
             else:
                 log.append(qso)
             dbUpdate = yield from db.execute("""
                 update log set qso = %(qso)s
-                where callsign = %(callsign)s and qso->>'ts' = %(ts)%""",
+                where callsign = %(callsign)s and (qso->>'ts')::float = %(ts)%""",
                 {'callsign': callsign, 'ts': qso['ts'], 'qso': json.dumps(qso)})
             logging.debug("Update result: " + str(dbUpdate))
             if not dbUpdate:
@@ -652,13 +652,13 @@ def logHandler(request):
                 yield from dbInsertQso(callsign, qso)
                 with open( logPath, 'w' ) as f:
                     json.dump( log, f )
-                return web.json_response({'serverTs': qso['ts']})
+                return web.json_response({'ts': qso['ts']})
 
     if 'delete' in data:
         log = [x for x in log if x['ts'] != data['delete']]
         yield from db.execute("""
             delete from log 
-            where callsign = %(callsign)s and qso->>'ts' = %(ts)""",
+            where callsign = %(callsign)s and (qso->>'ts')::float = %(ts)s""",
             {'callsign': callsign, 'ts': data['delete']})
 
     if 'clear' in data:
