@@ -404,15 +404,11 @@ def parseLocation(location):
 def locationHandler( request ):
     newData = yield from request.json()
     if ('token' not in newData or not newData['token']) and 'location' in newData:
-        logging.info('Location w/o token:' )
-        logging.info(newData)
         return parseLocation(newData['location'])
     callsign = decodeToken( newData )
     if not isinstance( callsign, str ):
         return callsign
     stationPath = yield from getStationPathByAdminCS( callsign )
-    logging.info('Location: ' + stationPath)
-    logging.info(newData)
     fp = stationPath + '/status.json'
     data = loadJSON( fp )
     if not data:
@@ -587,6 +583,13 @@ def logFromDB(callsign):
     return log
 
 @asyncio.coroutine
+def dbInsertQso(callsign, qso):
+    yield from db.execute("""
+        insert into log (callsign, qso) 
+        values ( %(callsign)s, %(qso)s )""",
+        { 'callsign': callsign, 'qso': json.dumps( qso ) } )
+
+@asyncio.coroutine
 def logHandler(request):
     data = yield from request.json()
     callsign = decodeToken( data )
@@ -608,36 +611,63 @@ def logHandler(request):
         qso = data['qso']
         dt = datetime.strptime( qso['ts'], "%Y-%m-%d %H:%M:%S" )
         qso['date'], qso['time'] = dtFmt( dt )
-        sameFl = True
-        if log:
-            for key in qso:
-                if not key in ('ts', 'rda', 'wff') and qso[key] != log[0][key]:
-                    sameFl = False
-                    break
+        serverTs = qso.pop('serverTs')
+
+        if serverTs:
+            qso['ts'] = serverTs
+            qsoIdx = [i[0] for i in enumerate(log) if i[1]['ts'] == qso['ts']]
+            if qsoIdx:
+                log[qsoIdx[0]] = qso
+            else:
+                log.append(qso)
+            dbUpdate = yield from db.execute("""
+                update log set qso = %(qso)s
+                where callsign = %(callsign)s and (qso->>'ts')::float = %(ts)%""",
+                {'callsign': callsign, 'ts': qso['ts'], 'qso': json.dumps(qso)})
+            logging.debug("Update result: " + str(dbUpdate))
+            if not dbUpdate:
+                yield from dbInsertQso(callsign, qso)
+
         else:
-            sameFl = False
-        if not sameFl:
+            sameFl = True
+            if log:
+                for key in qso:
+                    if not key in ('ts', 'rda', 'wff', 'comments', 'serverTs')\
+                        and qso[key] != log[0][key]:
+                        sameFl = False
+                        break
+            else:
+                sameFl = False
+            if not sameFl:
 
-            statusPath = stationPath + '/status.json'
-            statusData = loadJSON(statusPath)
-            ts = dt.timestamp() + tzOffset()
-            if ('freq' not in statusData or statusData['freq']['ts'] < ts):
-                statusData['freq'] = {'value': qso['freq'], 'ts': ts} 
-                with open(statusPath, 'w' ) as f:
-                    json.dump(statusData, f, ensure_ascii = False )
+                statusPath = stationPath + '/status.json'
+                statusData = loadJSON(statusPath)
+                ts = dt.timestamp() + tzOffset()
+                if ('freq' not in statusData or statusData['freq']['ts'] < ts):
+                    statusData['freq'] = {'value': qso['freq'], 'ts': ts} 
+                    with open(statusPath, 'w' ) as f:
+                        json.dump(statusData, f, ensure_ascii = False )
 
-            if qso['rda']:
-                qso['rda'] = qso['rda'].upper()
-            if qso['wff']:
-                qso['wff'] = qso['wff'].upper()
-            qso['ts'] = time.time()
-            log.insert( 0, qso )
-            yield from db.execute( 
-                "insert into log (callsign, qso) values ( %(callsign)s, %(qso)s )",
-                { 'callsign': callsign, 'qso': json.dumps( qso ) } )
+                qso['ts'] = time.time()
+                log.insert( 0, qso )
+                yield from dbInsertQso(callsign, qso)
+                with open( logPath, 'w' ) as f:
+                    json.dump( log, f )
+                return web.json_response({'ts': qso['ts']})
+
+    if 'delete' in data:
+        log = [x for x in log if x['ts'] != data['delete']]
+        yield from db.execute("""
+            delete from log 
+            where callsign = %(callsign)s and (qso->>'ts')::float = %(ts)s""",
+            {'callsign': callsign, 'ts': data['delete']})
 
     if 'clear' in data:
         log = []
+        yield from db.execute( 
+            "delete from log where callsign = %(callsign)s",
+            { 'callsign': callsign } )
+
     with open( logPath, 'w' ) as f:
         json.dump( log, f )
     return web.Response( text = 'OK' )
