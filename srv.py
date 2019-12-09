@@ -431,6 +431,11 @@ def locationHandler( request ):
         data['online'] = newData['online']
     if 'freq' in newData and newData['freq']:
         data['freq'] = {'value': newData['freq'], 'ts': data['ts']}
+        stationSettings = loadJSON(stationPath + '/settings.json')
+        fromCallsign = stationSettings['station']['callsign']
+        insertChatMessage(path=stationPath + '/chat.json',\
+            msg_data={'from': fromCallsign, 'text': '<b><i>' + newData['freq'] + '</b></i>'},\
+            admin=True)
     if 'location' in newData and newData['location']:
         data['loc'] = locator(newData['location'])
         all_rda = rda(newData['location'])
@@ -702,26 +707,33 @@ def chatHandler(request):
             return web.HTTPUnauthorized( \
                 text = 'You must be logged in as station or site admin' )
     chat = []
-    if not 'clear' in data:
-        chat = loadJSON( chatPath )
-        if not chat:
-            chat = []
+    if not 'clear' in data and not 'delete' in data:
+        insertChatMessage(path=chatPath, msg_data=data, admin=admin)
+    else:
         if 'delete' in data:
+            chat = loadJSON( chatPath )
+            if not chat:
+                chat = []
             chat = [ x for x in chat if x['ts'] != data['delete'] ]
-        else:
-            msg = { 'user': data['from'], \
-                    'text': data['text'], \
-                    'admin': admin, 'ts': time.time() }
-            msg['date'], msg['time'] = dtFmt( datetime.utcnow() )
-            if 'name' in data:
-                msg['name'] = data['name']
-            chat.insert( 0, msg )
-    if len( chat ) > 100:
-        chat = chat[:100]
-    with open( chatPath, 'w' ) as f:
-        json.dump( chat, f, ensure_ascii = False )
+        with open( chatPath, 'w' ) as f:
+            json.dump( chat, f, ensure_ascii = False )
     return web.Response( text = 'OK' )
 
+def insertChatMessage(path, msg_data, admin):
+    chat = loadJSON(path)
+    if not chat:
+        chat = []
+    msg = { 'user': msg_data['from'], \
+            'text': msg_data['text'], \
+            'admin': admin, 'ts': time.time() }
+    msg['date'], msg['time'] = dtFmt( datetime.utcnow() )
+    if 'name' in msg_data:
+        msg['name'] = msg_data['name']
+    chat.insert(0, msg)
+    if len( chat ) > 100:
+        chat = chat[:100]
+    with open(path, 'w') as f:
+        json.dump(chat, f, ensure_ascii = False)
 
 @asyncio.coroutine
 def sendSpotHandler(request):
