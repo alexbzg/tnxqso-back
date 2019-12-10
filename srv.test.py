@@ -5,6 +5,8 @@ import argparse, asyncio, logging, logging.handlers, aiohttp, jwt, os, base64, \
         json, time, math, smtplib, shutil, io, zipfile, pwd, grp, uuid
 from datetime import datetime
 from aiohttp import web
+from wand.image import Image
+from wand.color import Color
 from common import siteConf, loadJSON, appRoot, startLogging, \
         createFtpUser, setFtpPasswd, dtFmt, tzOffset
 from tqdb import DBConn, spliceParams
@@ -565,12 +567,25 @@ def galleryHandler(request):
         file = base64.b64decode( data['file'].split( ',' )[1] )
         fileNameBase = uuid.uuid4().hex
         fileName = fileNameBase + '.' + data['fileName'].rpartition('.')[2]
-        with open(galleryPath + '/' + fileName, 'wb') as fimg:
+        filePath = galleryPath + '/' + fileName 
+        with open(filePath, 'wb') as fimg:
             fimg.write(file)
-        galleryData.insert({\
+        with Image(filename=filePath) as img:
+            with Image(width=img.width, height=img.height,
+                    background=Color("#EEEEEE")) as bg:
+                bg.composite(img, 0, 0)
+                size = img.width if img.width < img.height else img.height
+                bg.crop(width=size, height=size, gravity='top')
+                bg.resize(256, 256)
+                bg.format = 'jpeg'
+                bg.save(filename=galleryPath + '/' + fileNameBase +\
+                    '_thumb.jpeg')             
+        galleryData.insert(0, {\
             'file': 'gallery/' + fileName,
+            'thumb': 'gallery/' + fileNameBase + '_thumb.jpeg',
             'caption': data['caption'],
             'id': fileNameBase})
+
     if 'delete' in data:
         items = [x for x in galleryData if x['id'] == data['delete']]
         if items:
