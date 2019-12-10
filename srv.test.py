@@ -554,8 +554,12 @@ def galleryHandler(request):
     if not isinstance( callsign, str ):
         return callsign
     stationPath = yield from getStationPathByAdminCS( callsign )
+    galleryPath = stationPath + '/gallery'
+    galleryDataPath = stationPath + '/gallery.json'
+    galleryData = loadJSON(galleryDataPath)
+    if not galleryData:
+        galleryData = []
     if 'file' in data:
-        galleryPath = stationPath + '/gallery'
         if not os.path.isdir(galleryPath):
             os.mkdir(galleryPath)
         file = base64.b64decode( data['file'].split( ',' )[1] )
@@ -563,7 +567,26 @@ def galleryHandler(request):
         fileName = fileNameBase + '.' + data['fileName'].rpartition('.')[2]
         with open(galleryPath + '/' + fileName, 'wb') as fimg:
             fimg.write(file)
+        galleryData.insert({\
+            'file': 'gallery/' + fileName,
+            'caption': data['caption'],
+            'id': fileNameBase})
+    if 'delete' in data:
+        items = [x for x in galleryData if x['id'] == data['delete']]
+        if items:
+            item = items[0]
+            galleryData = [x for x in galleryData if x != item]
+            deleteGalleryItem(stationPath, item)
+    if 'clear' in data:
+        for item in galleryData:
+            deleteGalleryItem(stationPath, item)
+        galleryData = []
+    with open(galleryDataPath, 'w') as fg:
+        json.dump(galleryData, fg, ensure_ascii = False)
+    return web.Response(text='OK')
 
+def deleteGlleryItem(stationPath, item):
+    os.unlink(stationPath + '/' + item['file'])
 
 
 
@@ -801,6 +824,7 @@ if __name__ == '__main__':
             passwordRecoveryRequestHandler )
     app.router.add_post('/aiohttp/contact', contactHandler )
     app.router.add_post('/aiohttp/userData', userDataHandler )
+    app.router.add_post('/aiohttp/gallery', galleryHandler )
     app.router.add_post('/aiohttp/sendSpot', sendSpotHandler )
     db.verbose = True
     asyncio.async( db.connect() )
