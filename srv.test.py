@@ -15,7 +15,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
 import requests
-
+import ffmpeg
 
 parser = argparse.ArgumentParser(description="tnxqso backend aiohttp server")
 parser.add_argument('--test', action = "store_true" )
@@ -566,24 +566,42 @@ def galleryHandler(request):
             os.mkdir(galleryPath)
         file = base64.b64decode( data['file'].split( ',' )[1] )
         fileNameBase = uuid.uuid4().hex
-        fileName = fileNameBase + '.' + data['fileName'].rpartition('.')[2]
+        fileExt = data['fileName'].rpartition('.')[2]
+        fileName = fileNameBase + '.' + fileExt
+        fileType = 'image' if 'data:image' in data['file'] else 'video'
         filePath = galleryPath + '/' + fileName 
         with open(filePath, 'wb') as fimg:
             fimg.write(file)
-        with Image(filename=filePath) as img:
+        tnSrc = filePath
+        width = None
+        if fileType == 'video':
+            tnSrc = galleryPath + '/' + fileNameBase + '.jpeg'
+            (
+                ffmpeg
+                    .input(filePath)
+                    .output(tnSrc, vframes=1)
+                    .run()
+            )
+            probe = ffmpeg.probe(filePath)
+            video_stream = next((stream for stream in probe['streams'] if stream['codec_type'] == 'video'), None)
+            width = int(video_stream['width'])
+        with Image(filename=tnSrc) as img:
             with Image(width=img.width, height=img.height,
                     background=Color("#EEEEEE")) as bg:
                 bg.composite(img, 0, 0)
                 size = img.width if img.width < img.height else img.height
-                bg.crop(width=size, height=size, gravity='top')
-                bg.resize(256, 256)
+                bg.crop(width=size, height=size, gravity='north')
+                bg.resize(200, 200)
                 bg.format = 'jpeg'
                 bg.save(filename=galleryPath + '/' + fileNameBase +\
                     '_thumb.jpeg')             
+        if fileType == 'video':
+            os.unlink(tnSrc)
         galleryData.insert(0, {\
             'file': 'gallery/' + fileName,
             'thumb': 'gallery/' + fileNameBase + '_thumb.jpeg',
             'caption': data['caption'],
+            'type': fileType,
             'id': fileNameBase})
 
     if 'delete' in data:
@@ -600,10 +618,8 @@ def galleryHandler(request):
         json.dump(galleryData, fg, ensure_ascii = False)
     return web.Response(text='OK')
 
-def deleteGlleryItem(stationPath, item):
+def deleteGalleryItem(stationPath, item):
     os.unlink(stationPath + '/' + item['file'])
-
-
 
 @asyncio.coroutine
 def trackHandler(request):
@@ -825,7 +841,7 @@ def sendSpotHandler(request):
  
  
 if __name__ == '__main__':
-    app = web.Application( client_max_size = 10 * 1024 ** 2 )
+    app = web.Application( client_max_size = 100 * 1024 ** 2 )
     app.router.add_post('/aiohttp/login', loginHandler)
     app.router.add_post('/aiohttp/userSettings', userSettingsHandler)
     app.router.add_post('/aiohttp/news', newsHandler)
