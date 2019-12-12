@@ -2,9 +2,11 @@
 #coding=utf-8
 
 import argparse, asyncio, logging, logging.handlers, aiohttp, jwt, os, base64, \
-        json, time, math, smtplib, shutil, io, zipfile, pwd, grp
+        json, time, math, smtplib, shutil, io, zipfile, pwd, grp, uuid
 from datetime import datetime
 from aiohttp import web
+from wand.image import Image
+from wand.color import Color
 from common import siteConf, loadJSON, appRoot, startLogging, \
         createFtpUser, setFtpPasswd, dtFmt, tzOffset
 from tqdb import DBConn, spliceParams
@@ -13,7 +15,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
 import requests
-
+import ffmpeg
 
 parser = argparse.ArgumentParser(description="tnxqso backend aiohttp server")
 parser.add_argument('--test', action = "store_true" )
@@ -548,6 +550,78 @@ def activeUsersHandler(request):
     return web.Response( text = 'OK' )
 
 @asyncio.coroutine
+def galleryHandler(request):
+    data = yield from request.json()
+    callsign = decodeToken( data )
+    if not isinstance( callsign, str ):
+        return callsign
+    stationPath = yield from getStationPathByAdminCS( callsign )
+    galleryPath = stationPath + '/gallery'
+    galleryDataPath = stationPath + '/gallery.json'
+    galleryData = loadJSON(galleryDataPath)
+    if not galleryData:
+        galleryData = []
+    if 'file' in data:
+        if not os.path.isdir(galleryPath):
+            os.mkdir(galleryPath)
+        file = base64.b64decode( data['file'].split( ',' )[1] )
+        fileNameBase = uuid.uuid4().hex
+        fileExt = data['fileName'].rpartition('.')[2]
+        fileName = fileNameBase + '.' + fileExt
+        fileType = 'image' if 'data:image' in data['file'] else 'video'
+        filePath = galleryPath + '/' + fileName 
+        with open(filePath, 'wb') as fimg:
+            fimg.write(file)
+        tnSrc = filePath
+        width = None
+        if fileType == 'video':
+            tnSrc = galleryPath + '/' + fileNameBase + '.jpeg'
+            (
+                ffmpeg
+                    .input(filePath)
+                    .output(tnSrc, vframes=1)
+                    .run()
+            )
+            probe = ffmpeg.probe(filePath)
+            video_stream = next((stream for stream in probe['streams'] if stream['codec_type'] == 'video'), None)
+            width = int(video_stream['width'])
+        with Image(filename=tnSrc) as img:
+            with Image(width=img.width, height=img.height,
+                    background=Color("#EEEEEE")) as bg:
+                bg.composite(img, 0, 0)
+                size = img.width if img.width < img.height else img.height
+                bg.crop(width=size, height=size, gravity='north')
+                bg.resize(200, 200)
+                bg.format = 'jpeg'
+                bg.save(filename=galleryPath + '/' + fileNameBase +\
+                    '_thumb.jpeg')             
+        if fileType == 'video':
+            os.unlink(tnSrc)
+        galleryData.insert(0, {\
+            'file': 'gallery/' + fileName,
+            'thumb': 'gallery/' + fileNameBase + '_thumb.jpeg',
+            'caption': data['caption'],
+            'type': fileType,
+            'id': fileNameBase})
+
+    if 'delete' in data:
+        items = [x for x in galleryData if x['id'] == data['delete']]
+        if items:
+            item = items[0]
+            galleryData = [x for x in galleryData if x != item]
+            deleteGalleryItem(stationPath, item)
+    if 'clear' in data:
+        for item in galleryData:
+            deleteGalleryItem(stationPath, item)
+        galleryData = []
+    with open(galleryDataPath, 'w') as fg:
+        json.dump(galleryData, fg, ensure_ascii = False)
+    return web.Response(text='OK')
+
+def deleteGalleryItem(stationPath, item):
+    os.unlink(stationPath + '/' + item['file'])
+
+@asyncio.coroutine
 def trackHandler(request):
     data = yield from request.json()
     callsign = decodeToken( data )
@@ -767,7 +841,7 @@ def sendSpotHandler(request):
  
  
 if __name__ == '__main__':
-    app = web.Application( client_max_size = 10 * 1024 ** 2 )
+    app = web.Application( client_max_size = 100 * 1024 ** 2 )
     app.router.add_post('/aiohttp/login', loginHandler)
     app.router.add_post('/aiohttp/userSettings', userSettingsHandler)
     app.router.add_post('/aiohttp/news', newsHandler)
@@ -781,6 +855,7 @@ if __name__ == '__main__':
             passwordRecoveryRequestHandler )
     app.router.add_post('/aiohttp/contact', contactHandler )
     app.router.add_post('/aiohttp/userData', userDataHandler )
+    app.router.add_post('/aiohttp/gallery', galleryHandler )
     app.router.add_post('/aiohttp/sendSpot', sendSpotHandler )
     db.verbose = True
     asyncio.async( db.connect() )
