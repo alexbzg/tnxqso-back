@@ -583,7 +583,8 @@ def galleryHandler(request):
                     .run()
             )
             probe = ffmpeg.probe(filePath)
-            video_stream = next((stream for stream in probe['streams'] if stream['codec_type'] == 'video'), None)
+            video_stream = next((stream for stream in probe['streams']\
+                if stream['codec_type'] == 'video'), None)
             width = int(video_stream['width'])
         with Image(filename=tnSrc) as img:
             with Image(width=img.width, height=img.height,
@@ -602,6 +603,7 @@ def galleryHandler(request):
             'thumb': 'gallery/' + fileNameBase + '_thumb.jpeg',
             'caption': data['caption'],
             'type': fileType,
+            'ts': time.time(),
             'id': fileNameBase})
 
     if 'delete' in data:
