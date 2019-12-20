@@ -391,7 +391,7 @@ def rda(location, strict=False):
 
 def parseLocation(location):
     data = {}
-    data['loc'] = locator(location)
+    data['loc'], data['loc8'] = locator(location)
     data['rafa'] = RAFA_LOCS[data['loc']] if data['loc'] in RAFA_LOCS else None
     all_rda = rda(location)
     strict_rda = rda(location, strict=True)
@@ -439,7 +439,7 @@ def locationHandler( request ):
             msg_data={'from': fromCallsign, 'text': '<b><i>' + newData['freq'] + '</b></i>'},\
             admin=True)
     if 'location' in newData and newData['location']:
-        data['loc'] = locator(newData['location'])
+        data['loc'], data['loc8'] = locator(newData['location'])
         all_rda = rda(newData['location'])
         strict_rda = rda(newData['location'], strict=True)
         data['rda'] = ' '.join(all_rda) if all_rda else None
@@ -489,7 +489,11 @@ def locator(location):
     lng = 24 * (lng - math.trunc(lng))
     qth += chr(65 + int(lng))
     qth += chr(65 + int(lat))
-    return qth
+    lat = 10 * (lat - math.trunc(lat))
+    lng = 10 * (lng - math.trunc(lng))
+    sfx = chr(48 + int(lng))
+    sfx += chr(48 + int(lat))
+    return (qth, sfx)
 
 @asyncio.coroutine
 def newsHandler(request):
@@ -550,8 +554,32 @@ def activeUsersHandler(request):
     return web.Response( text = 'OK' )
 
 @asyncio.coroutine
+def read_multipart(request):
+    data = {}
+    reader = yield from request.multipart()
+    while True:
+        field = yield from reader.next()
+        if not field:
+            break
+        contents = yield from field.read()
+        if field.filename:
+            data[field.name] = {\
+                'contents': contents,\
+                'name': field.filename,
+                'type': field.headers[aiohttp.hdrs.CONTENT_TYPE]}
+        else:
+            data[field.name] = contents.decode('utf-8')
+            if data[field.name] == 'null':
+                data[field.name] = None
+    return data
+        
+@asyncio.coroutine
 def galleryHandler(request):
-    data = yield from request.json()
+    data = None
+    if 'multipart/form-data;' in request.headers[aiohttp.hdrs.CONTENT_TYPE]:
+        data = yield from read_multipart(request)
+    else:
+        data = yield from request.json()
     callsign = decodeToken( data )
     if not isinstance( callsign, str ):
         return callsign
@@ -564,11 +592,12 @@ def galleryHandler(request):
     if 'file' in data:
         if not os.path.isdir(galleryPath):
             os.mkdir(galleryPath)
-        file = base64.b64decode( data['file'].split( ',' )[1] )
+        file = data['file']['contents']
         fileNameBase = uuid.uuid4().hex
-        fileExt = data['fileName'].rpartition('.')[2]
+        fileExt = data['file']['name'].rpartition('.')[2]
         fileName = fileNameBase + '.' + fileExt
-        fileType = 'image' if 'data:image' in data['file'] else 'video'
+        fileType = 'image' if 'image'\
+            in data['file']['type'] else 'video'
         filePath = galleryPath + '/' + fileName 
         with open(filePath, 'wb') as fimg:
             fimg.write(file)
