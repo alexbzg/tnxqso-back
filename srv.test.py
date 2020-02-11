@@ -216,6 +216,9 @@ def loginHandler(request):
             if not userData or userData['password'] != data['password']:
                 error = 'Wrong callsign or password.'            
     if error:
+        logging.error('Bad Login:')
+        logging.error(data)
+        logging.error(error)
         return web.HTTPBadRequest( text = error )
     else:
         userData['token'] = jwt.encode( { 'callsign': data['login'] }, \
@@ -365,7 +368,7 @@ def cosd( d ):
     return math.cos( math.radians(d) )
 
 def rda(location, strict=False):
-    url = 'https://r1cf.ru/geoserver/cite/wfs?SERVICE=WFS&REQUEST=GetFeature&TypeName=RDA_FULL_R&VERSION=1.1.0&CQL_FILTER={predi}%28the_geom,POINT%28{lat}%20{lng}%29{addParams}%29'
+    url = 'https://r1cf.ru/geoserver/cite/wfs?SERVICE=WFS&REQUEST=GetFeature&TypeName=RDA_2020&VERSION=1.1.0&CQL_FILTER={predi}%28the_geom,POINT%28{lat}%20{lng}%29{addParams}%29'
     params = {
         'predi': 'INTERSECTS' if strict else 'DWITHIN',\
         'lat': location[0],\
@@ -405,6 +408,9 @@ def parseLocation(location):
 @asyncio.coroutine
 def locationHandler( request ):
     newData = yield from request.json()
+#    if 'okhttp' in request.headers[aiohttp.hdrs.USER_AGENT]:
+#        logging.info('----------- okhttp request ------------')
+#        logging.info(newData)
     if ('token' not in newData or not newData['token']) and 'location' in newData:
         return parseLocation(newData['location'])
     callsign = decodeToken( newData )
@@ -721,7 +727,7 @@ def logHandler(request):
         qso = data['qso']
         dt = datetime.strptime( qso['ts'], "%Y-%m-%d %H:%M:%S" )
         qso['date'], qso['time'] = dtFmt( dt )
-        serverTs = qso.pop('serverTs')
+        serverTs = qso.pop('serverTs') if 'serverTs' in qso else None
 
         if serverTs:
             qso['ts'] = serverTs
@@ -732,38 +738,40 @@ def logHandler(request):
                 log.append(qso)
             dbUpdate = yield from db.execute("""
                 update log set qso = %(qso)s
-                where callsign = %(callsign)s and (qso->>'ts')::float = %(ts)%""",
+                where callsign = %(callsign)s and (qso->>'ts')::float = %(ts)s""",
                 {'callsign': callsign, 'ts': qso['ts'], 'qso': json.dumps(qso)})
             logging.debug("Update result: " + str(dbUpdate))
             if not dbUpdate:
                 yield from dbInsertQso(callsign, qso)
 
         else:
-            sameFl = True
             if log:
-                for key in qso:
-                    if not key in ('ts', 'rda', 'wff', 'comments', 'serverTs')\
-                        and qso[key] != log[0][key]:
-                        sameFl = False
-                        break
-            else:
-                sameFl = False
-            if not sameFl:
+                for log_qso in log:
+                    sameFl = True
+                    for key in qso:
+                        if key not in ('ts', 'rda', 'wff', 'comments', 'serverTs')\
+                            and (key not in log_qso or qso[key] != log_qso[key]):
+                            sameFl = False
+                            break
+                    if sameFl:
+                        return web.json_response({'ts': log_qso['ts']})
+                       
+            statusPath = stationPath + '/status.json'
+            statusData = loadJSON(statusPath)
+            ts = dt.timestamp() + tzOffset()
+            if ('freq' not in statusData or statusData['freq']['ts'] < ts):
+                statusData['freq'] = {'value': qso['freq'], 'ts': ts} 
+                with open(statusPath, 'w' ) as f:
+                    json.dump(statusData, f, ensure_ascii = False )
 
-                statusPath = stationPath + '/status.json'
-                statusData = loadJSON(statusPath)
-                ts = dt.timestamp() + tzOffset()
-                if ('freq' not in statusData or statusData['freq']['ts'] < ts):
-                    statusData['freq'] = {'value': qso['freq'], 'ts': ts} 
-                    with open(statusPath, 'w' ) as f:
-                        json.dump(statusData, f, ensure_ascii = False )
-
-                qso['ts'] = time.time()
-                log.insert( 0, qso )
-                yield from dbInsertQso(callsign, qso)
-                with open( logPath, 'w' ) as f:
-                    json.dump( log, f )
-                return web.json_response({'ts': qso['ts']})
+            qso['ts'] = time.time()
+            log.insert( 0, qso )
+            yield from dbInsertQso(callsign, qso)
+            with open( logPath, 'w' ) as f:
+                json.dump( log, f )
+            rsp = {'ts': qso['ts']}
+                
+            return web.json_response(rsp)
 
     if 'delete' in data:
         log = [x for x in log if x['ts'] != data['delete']]
