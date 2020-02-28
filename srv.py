@@ -16,6 +16,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
 import requests
 import ffmpeg
+from geopy.geocoders import Nominatim
 
 parser = argparse.ArgumentParser(description="tnxqso backend aiohttp server")
 parser.add_argument('--test', action = "store_true" )
@@ -65,6 +66,8 @@ with open(appRoot + '/rafa.csv', 'r') as f_rafa:
 
 app = None
 lastSpotSent = None
+
+geolocator = Nominatim(user_agent="TNXQSO")
 
 @asyncio.coroutine
 def checkRecaptcha( response ):
@@ -392,16 +395,47 @@ def rda(location, strict=False):
     except requests.exceptions.Timeout:
         return ['-----']
 
+def waip(location, strict=False):
+    url = 'https://r1cf.ru/geoserver/cite/wfs?SERVICE=WFS&REQUEST=GetFeature&TypeName=WAIP2&VERSION=1.1.0&CQL_FILTER={predi}%28the_geom,POINT%28{lat}%20{lng}%29{addParams}%29'
+    params = {
+        'predi': 'INTERSECTS' if strict else 'DWITHIN',\
+        'lat': location[0],\
+        'lng': location[1],\
+        'addParams': '' if strict else ',0.0015,kilometers'\
+        }
+    try:
+        rsp = requests.get(url.format_map(params), verify=False, timeout=(0.1, 1))
+        tag = '<cite:WAIPIT>'
+        data = rsp.text
+        rdas = []
+        while tag in data:
+            start = data.find(tag) + len(tag)
+            rdas.append(data[start:start + 2])
+            data = data[start+3:]
+        if rdas:
+            return rdas[0] if strict else rdas
+        else:
+            return None
+
+    except requests.exceptions.Timeout:
+        return ['-----']
+
+
 def parseLocation(location):
     data = {}
     data['loc'], data['loc8'] = locator(location)
-    data['rafa'] = RAFA_LOCS[data['loc']] if data['loc'] in RAFA_LOCS else None
-    all_rda = rda(location)
-    strict_rda = rda(location, strict=True)
-    data['rda'] = ' '.join(all_rda) if all_rda else None
-    data['rdaStrict'] = strict_rda
-    if all_rda and strict_rda:
-        data['rdaNear'] = ' '.join([x for x in all_rda if x != strict_rda or x == '-----'])
+    geo_data = geolocator.reverse(str(location[0]) + ", " + str(location[1]))
+    country_code = geo_data.raw['address']['country_code']
+    if country_code == 'ru':
+        data['rafa'] = RAFA_LOCS[data['loc']] if data['loc'] in RAFA_LOCS else None
+        all_rda = rda(location)
+        strict_rda = rda(location, strict=True)
+        data['rda'] = ' '.join(all_rda) if all_rda else None
+        data['rdaStrict'] = strict_rda
+        if all_rda and strict_rda:
+            data['rdaNear'] = ' '.join([x for x in all_rda if x != strict_rda or x == '-----'])
+    elif country_code == 'it':
+        data['waip'] = waip(location, strict=True)
 
     return web.json_response(data)
 
@@ -445,14 +479,30 @@ def locationHandler( request ):
             msg_data={'from': fromCallsign, 'text': '<b><i>' + newData['freq'] + '</b></i>'},\
             admin=True)
     if 'location' in newData and newData['location']:
-        data['loc'], data['loc8'] = locator(newData['location'])
-        all_rda = rda(newData['location'])
-        strict_rda = rda(newData['location'], strict=True)
-        data['rda'] = ' '.join(all_rda) if all_rda else None
-        data['rdaStrict'] = strict_rda
-        if all_rda and strict_rda:
-            data['rdaNear'] = ' '.join([x for x in all_rda if x != strict_rda or x == '-----'])
-        data['rafa'] = RAFA_LOCS[data['loc']] if data['loc'] in RAFA_LOCS else None
+        location = newData['location']
+        data['loc'], data['loc8'] = locator(location)
+        
+        geo_data = geolocator.reverse(str(location[0]) + ", " + str(location[1]))
+        country_code = geo_data.raw['address']['country_code']
+        if country_code == 'ru':
+
+            all_rda = rda(newData['location'])
+            strict_rda = rda(newData['location'], strict=True)
+            data['rda'] = ' '.join(all_rda) if all_rda else None
+            data['rdaStrict'] = strict_rda
+            if all_rda and strict_rda:
+                data['rdaNear'] = ' '.join([x for x in all_rda if x != strict_rda or x == '-----'])
+            data['rafa'] = RAFA_LOCS[data['loc']] if data['loc'] in RAFA_LOCS else None
+            for key in ('waip',):
+                if key in data:
+                    del data[key]
+
+        elif country_code == 'it':
+            data['waip'] = waip(location, strict=True)
+            for key in ('rda', 'rdaStrict', 'rdaNear', 'rafa'):
+                if key in data:
+                    del data[key]
+
         if 'comments' in newData:
             data['comments'] = newData['comments']
         if 'location' in data and data['location']:
