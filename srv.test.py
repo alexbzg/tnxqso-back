@@ -505,11 +505,20 @@ def locationHandler( request ):
                     / 3600 )
 
     if 'qth' in newData:
+        logging.debug('Current data:')
+        logging.debug(data)
+        logging.debug('New data:')
+        logging.debug(newData)
+ 
         if 'qth' not in data:
             data['qth'] = {'fields':\
                 empty_qth_fields(country=country)}
         for key in newData['qth']['fields'].keys():
-            data['qth']['fields']['values'][key] = newData['qth']['fields'][key]
+            logging.debug('Key:')
+            logging.debug(type(key))
+            logging.debug(data['qth']['fields']['values'][int(key)])
+            logging.debug(newData['qth']['fields'][key])
+            data['qth']['fields']['values'][int(key)] = newData['qth']['fields'][key]
         if 'loc' in newData['qth']:
             data['qth']['loc'] = newData['qth']['loc']
             
