@@ -7,6 +7,8 @@ from datetime import datetime
 from aiohttp import web
 from wand.image import Image
 from wand.color import Color
+from wand.api import library
+from ctypes import c_void_p, c_size_t
 from common import siteConf, loadJSON, appRoot, startLogging, \
         createFtpUser, setFtpPasswd, dtFmt, tzOffset
 from tqdb import DBConn, spliceParams
@@ -17,6 +19,8 @@ from email.mime.application import MIMEApplication
 import requests
 import ffmpeg
 import countries
+
+library.MagickSetCompressionQuality.argtypes = [c_void_p, c_size_t]
 
 parser = argparse.ArgumentParser(description="tnxqso backend aiohttp server")
 parser.add_argument('--test', action = "store_true" )
@@ -353,12 +357,12 @@ def userSettingsHandler(request):
 
 @asyncio.coroutine
 def saveStationSettings( stationCallsign, adminCallsign, settings ):
+    settings['admin'] = adminCallsign
     yield from db.paramUpdate( 'users', { 'callsign': adminCallsign }, \
         { 'settings': json.dumps( settings ) } )
     if stationCallsign:
         stationPath = getStationPath( stationCallsign )
         if stationPath:
-            settings['admin'] = adminCallsign
             with open( stationPath + '/settings.json', 'w' ) as f:
                 json.dump( settings, f, ensure_ascii = False )
 
@@ -505,19 +509,11 @@ def locationHandler( request ):
                     / 3600 )
 
     if 'qth' in newData:
-        logging.debug('Current data:')
-        logging.debug(data)
-        logging.debug('New data:')
-        logging.debug(newData)
  
         if 'qth' not in data:
             data['qth'] = {'fields':\
                 empty_qth_fields(country=country)}
         for key in newData['qth']['fields'].keys():
-            logging.debug('Key:')
-            logging.debug(type(key))
-            logging.debug(data['qth']['fields']['values'][int(key)])
-            logging.debug(newData['qth']['fields'][key])
             data['qth']['fields']['values'][int(key)] = newData['qth']['fields'][key]
         if 'loc' in newData['qth']:
             data['qth']['loc'] = newData['qth']['loc']
@@ -642,6 +638,7 @@ def galleryHandler(request):
     galleryPath = stationPath + '/gallery'
     galleryDataPath = stationPath + '/gallery.json'
     galleryData = loadJSON(galleryDataPath)
+    site_gallery_params = conf['gallery'] 
     if not galleryData:
         galleryData = []
     if 'file' in data:
@@ -679,7 +676,15 @@ def galleryHandler(request):
                 bg.resize(200, 200)
                 bg.format = 'jpeg'
                 bg.save(filename=galleryPath + '/' + fileNameBase +\
-                    '_thumb.jpeg')             
+                    '_thumb.jpeg')
+                max_height, max_width = int(site_gallery_params['max_height']), int(site_gallery_params['max_width'])
+                if img.width > max_width or img.height > max_height:
+                    coeff = max_width / img.width
+                    if max_height / img.height < coeff:
+                        coeff = max_height / img.height
+                    img.resize(width=int(coeff * img.width), height=int(coeff * img.height))
+                    img.compression_quality = int(site_gallery_params['quality'])
+                    img.save(filename=filePath)
         if fileType == 'video':
             os.unlink(tnSrc)
         galleryData.insert(0, {\
@@ -689,6 +694,9 @@ def galleryHandler(request):
             'type': fileType,
             'ts': time.time(),
             'id': fileNameBase})
+        max_count = int(site_gallery_params['max_count'])
+        if len(galleryData) > max_count:
+            galleryData = sorted(galleryData, key=lambda item: item['ts'], reverse=True)[:max_count]
 
     if 'delete' in data:
         items = [x for x in galleryData if x['id'] == data['delete']]

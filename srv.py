@@ -7,6 +7,8 @@ from datetime import datetime
 from aiohttp import web
 from wand.image import Image
 from wand.color import Color
+from wand.api import library
+from ctypes import c_void_p, c_size_t
 from common import siteConf, loadJSON, appRoot, startLogging, \
         createFtpUser, setFtpPasswd, dtFmt, tzOffset
 from tqdb import DBConn, spliceParams
@@ -16,7 +18,9 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
 import requests
 import ffmpeg
-from geopy.geocoders import Nominatim
+import countries
+
+library.MagickSetCompressionQuality.argtypes = [c_void_p, c_size_t]
 
 parser = argparse.ArgumentParser(description="tnxqso backend aiohttp server")
 parser.add_argument('--test', action = "store_true" )
@@ -67,7 +71,24 @@ with open(appRoot + '/rafa.csv', 'r') as f_rafa:
 app = None
 lastSpotSent = None
 
-geolocator = Nominatim(user_agent="TNXQSO")
+country_checker = countries.CountryChecker(appRoot + '/world_borders/TM_WORLD_BORDERS-0.3.shp')
+def get_country(location):
+    return country_checker.getCountry(countries.Point(location[0], location[1])).iso
+
+WFS_PARAMS = {\
+        "rda": {"feature": "RDA_2020", "tag": "RDA"},\
+        "waip": {"feature": "WAIP2", "tag": "WAIPIT"},\
+        "wab": {"feature": "WAB", "tag": "NAME"}
+}
+
+QTH_PARAMS = loadJSON( webRoot + '/js/qthParams.json' )
+def empty_qth_fields(country=None):
+    data = {'titles': [QTH_PARAMS['defaultTitle']]*QTH_PARAMS['fieldCount'],\
+            'values': [None]*QTH_PARAMS['fieldCount']}
+    if country and country in QTH_PARAMS['countries']:
+        for idx in range(0, len(QTH_PARAMS['countries'][country]['fields'])):
+            data['titles'][idx] = QTH_PARAMS['countries'][country]['fields'][idx]
+    return data
 
 @asyncio.coroutine
 def checkRecaptcha( response ):
@@ -336,12 +357,12 @@ def userSettingsHandler(request):
 
 @asyncio.coroutine
 def saveStationSettings( stationCallsign, adminCallsign, settings ):
+    settings['admin'] = adminCallsign
     yield from db.paramUpdate( 'users', { 'callsign': adminCallsign }, \
         { 'settings': json.dumps( settings ) } )
     if stationCallsign:
         stationPath = getStationPath( stationCallsign )
         if stationPath:
-            settings['admin'] = adminCallsign
             with open( stationPath + '/settings.json', 'w' ) as f:
                 json.dump( settings, f, ensure_ascii = False )
 
@@ -370,85 +391,76 @@ def sind( d ):
 def cosd( d ):
     return math.cos( math.radians(d) )
 
-def rda(location, strict=False):
-    url = 'https://r1cf.ru/geoserver/cite/wfs?SERVICE=WFS&REQUEST=GetFeature&TypeName=RDA_2020&VERSION=1.1.0&CQL_FILTER={predi}%28the_geom,POINT%28{lat}%20{lng}%29{addParams}%29'
-    params = {
+def wfs_query(type, location, strict=False):
+    params = WFS_PARAMS[type]
+    url = 'https://r1cf.ru/geoserver/cite/wfs?SERVICE=WFS&REQUEST=GetFeature&TypeName={feature}&VERSION=1.1.0&CQL_FILTER={predi}%28the_geom,POINT%28{lat}%20{lng}%29{addParams}%29'
+    url_params = {
+        'feature': params['feature'],\
         'predi': 'INTERSECTS' if strict else 'DWITHIN',\
         'lat': location[0],\
         'lng': location[1],\
         'addParams': '' if strict else ',0.0015,kilometers'\
         }
     try:
-        rsp = requests.get(url.format_map(params), verify=False, timeout=(0.1, 1))
-        tag = '<cite:RDA>'
+        rsp = requests.get(url.format_map(url_params), verify=False, timeout=(0.1, 1))
+        tag = '<cite:' + params['tag'] + '>'
         data = rsp.text
-        rdas = []
+        result = []
         while tag in data:
             start = data.find(tag) + len(tag)
-            rdas.append(data[start:start + 5])
-            data = data[start+6:]
-        if rdas:
-            return rdas[0] if strict else rdas
+            end = data.find('<', start)
+            result.append(data[start:end])
+            data = data[end:]
+        if result:
+            return result[0] if strict else result
         else:
             return None
 
     except requests.exceptions.Timeout:
         return ['-----']
 
-def waip(location, strict=False):
-    url = 'https://r1cf.ru/geoserver/cite/wfs?SERVICE=WFS&REQUEST=GetFeature&TypeName=WAIP2&VERSION=1.1.0&CQL_FILTER={predi}%28the_geom,POINT%28{lat}%20{lng}%29{addParams}%29'
-    params = {
-        'predi': 'INTERSECTS' if strict else 'DWITHIN',\
-        'lat': location[0],\
-        'lng': location[1],\
-        'addParams': '' if strict else ',0.0015,kilometers'\
-        }
-    try:
-        rsp = requests.get(url.format_map(params), verify=False, timeout=(0.1, 1))
-        tag = '<cite:WAIPIT>'
-        data = rsp.text
-        rdas = []
-        while tag in data:
-            start = data.find(tag) + len(tag)
-            rdas.append(data[start:start + 2])
-            data = data[start+3:]
-        if rdas:
-            return rdas[0] if strict else rdas
-        else:
-            return None
+def get_qth_data(location, country=None):
 
-    except requests.exceptions.Timeout:
-        return ['-----']
+    if not country:
+        country = get_country(location)
 
-
-def parseLocation(location):
-    data = {}
+    data = {'fields': empty_qth_fields(country)}
     data['loc'], data['loc8'] = locator(location)
-        
-    data['rafa'] = RAFA_LOCS[data['loc']] if data['loc'] in RAFA_LOCS else None
-    all_rda = rda(location)
-    strict_rda = rda(location, strict=True)
-    data['rda'] = ' '.join(all_rda) if all_rda else None
-    data['rdaStrict'] = strict_rda
-    if all_rda and strict_rda:
-        data['rdaNear'] = ' '.join([x for x in all_rda if x != strict_rda or x == '-----'])
-    
-    data['waip'] = waip(location, strict=True)
 
-    return web.json_response(data)
+    if country == 'RU':
+
+        rda = '-----'
+        all_rda = wfs_query('rda', location)
+        strict_rda = wfs_query('rda', location, strict=True)
+        if all_rda:
+            if len(all_rda) > 1:
+                all_rda = [strict_rda] + [x for x in all_rda if x != strict_rda or x == '-----']
+                rda = ' '.join(all_rda)
+            else:
+                rda = all_rda[0]
+        data['fields']['values'][0] = rda
+        
+        data['fields']['values'][1] = RAFA_LOCS[data['loc']]\
+            if data['loc'] in RAFA_LOCS else None
+        
+    elif country == 'IT':
+        data['fields']['values'][0] = wfs_query('waip', location, strict=True)
+
+    elif country == 'GB':
+        data['fields']['values'][0] = wfs_query('wab', location, strict=True)
+
+    return data
 
 @asyncio.coroutine
 def locationHandler( request ):
     newData = yield from request.json()
-#    if 'okhttp' in request.headers[aiohttp.hdrs.USER_AGENT]:
-#        logging.info('----------- okhttp request ------------')
-#        logging.info(newData)
     if ('token' not in newData or not newData['token']) and 'location' in newData:
-        return parseLocation(newData['location'])
+        return web.json_response({'qth': get_qth_data(newData['location'])})
     callsign = decodeToken( newData )
     if not isinstance( callsign, str ):
         return callsign
     stationPath = yield from getStationPathByAdminCS( callsign )
+    stationSettings = loadJSON(stationPath + '/settings.json')
     fp = stationPath + '/status.json'
     data = loadJSON( fp )
     if not data:
@@ -459,37 +471,22 @@ def locationHandler( request ):
     data['ts'] = int(time.time()) 
     data['date'], data['time'] = dtFmt( dtUTC )    
     data['year'] = dtUTC.year
-    if 'loc' in newData:
-        data['loc'] = newData['loc']     
-    if 'rafa' in newData:
-        data['rafa'] = newData['rafa']     
-    if 'rda' in newData:
-        data['rda'] = newData['rda']     
-    if 'userFields' in newData:
-        data['userFields'] = newData['userFields']     
     if 'online' in newData:
         data['online'] = newData['online']
     if 'freq' in newData and newData['freq']:
         data['freq'] = {'value': newData['freq'], 'ts': data['ts']}
-        stationSettings = loadJSON(stationPath + '/settings.json')
         fromCallsign = stationSettings['station']['callsign']
         insertChatMessage(path=stationPath + '/chat.json',\
-            msg_data={'from': fromCallsign, 'text': '<b><i>' + newData['freq'] + '</b></i>'},\
+            msg_data={'from': fromCallsign,\
+            'text': '<b><i>' + newData['freq'] + '</b></i>'},\
             admin=True)
+    country = stationSettings['qthCountry'] if 'qthCountry' in stationSettings\
+        else None
     if 'location' in newData and newData['location']:
         location = newData['location']
-        data['loc'], data['loc8'] = locator(location)
-        
-        all_rda = rda(newData['location'])
-        strict_rda = rda(newData['location'], strict=True)
-        data['rda'] = ' '.join(all_rda) if all_rda else None
-        data['rdaStrict'] = strict_rda
-        if all_rda and strict_rda:
-            data['rdaNear'] = ' '.join([x for x in all_rda if x != strict_rda or x == '-----'])
-        data['rafa'] = RAFA_LOCS[data['loc']] if data['loc'] in RAFA_LOCS else None
-            
-        data['waip'] = waip(location, strict=True)
 
+        data['qth'] = get_qth_data(location, country=country)
+        
         if 'comments' in newData:
             data['comments'] = newData['comments']
         if 'location' in data and data['location']:
@@ -510,6 +507,17 @@ def locationHandler( request ):
             data['dt'] = data['locTs'] - data['prev']['ts']
             data['speed'] = d / ( float( data['locTs'] - data['prev']['ts'] ) \
                     / 3600 )
+
+    if 'qth' in newData:
+ 
+        if 'qth' not in data:
+            data['qth'] = {'fields':\
+                empty_qth_fields(country=country)}
+        for key in newData['qth']['fields'].keys():
+            data['qth']['fields']['values'][int(key)] = newData['qth']['fields'][key]
+        if 'loc' in newData['qth']:
+            data['qth']['loc'] = newData['qth']['loc']
+            
     with open( fp, 'w' ) as f:
         json.dump( data, f, ensure_ascii = False )
     return web.json_response(data)
@@ -630,6 +638,7 @@ def galleryHandler(request):
     galleryPath = stationPath + '/gallery'
     galleryDataPath = stationPath + '/gallery.json'
     galleryData = loadJSON(galleryDataPath)
+    site_gallery_params = conf['gallery'] 
     if not galleryData:
         galleryData = []
     if 'file' in data:
@@ -667,7 +676,15 @@ def galleryHandler(request):
                 bg.resize(200, 200)
                 bg.format = 'jpeg'
                 bg.save(filename=galleryPath + '/' + fileNameBase +\
-                    '_thumb.jpeg')             
+                    '_thumb.jpeg')
+                max_height, max_width = int(site_gallery_params['max_height']), int(site_gallery_params['max_width'])
+                if img.width > max_width or img.height > max_height:
+                    coeff = max_width / img.width
+                    if max_height / img.height < coeff:
+                        coeff = max_height / img.height
+                    img.resize(width=int(coeff * img.width), height=int(coeff * img.height))
+                    img.compression_quality = int(site_gallery_params['quality'])
+                    img.save(filename=filePath)
         if fileType == 'video':
             os.unlink(tnSrc)
         galleryData.insert(0, {\
@@ -677,6 +694,9 @@ def galleryHandler(request):
             'type': fileType,
             'ts': time.time(),
             'id': fileNameBase})
+        max_count = int(site_gallery_params['max_count'])
+        if len(galleryData) > max_count:
+            galleryData = sorted(galleryData, key=lambda item: item['ts'], reverse=True)[:max_count]
 
     if 'delete' in data:
         items = [x for x in galleryData if x['id'] == data['delete']]

@@ -24,6 +24,8 @@ def upload():
     yield from db.connect()
     users_data = yield from db.execute( "select * from users" )
     for row in users_data:
+        if not row['settings']:
+            continue
         station_callsign = row['settings']['station']['callsign']
         if station_callsign:
             station_path = webRoot + '/stations/' +\
