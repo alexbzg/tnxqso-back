@@ -805,6 +805,7 @@ def logHandler(request):
                     yield from dbInsertQso(callsign, qso)
 
             else:
+                new_qso = True  
                 if log:
                     for log_qso in log:
                         sameFl = True
@@ -814,21 +815,23 @@ def logHandler(request):
                                 sameFl = False
                                 break
                         if sameFl:
-                            return web.json_response({'ts': log_qso['ts']})
+                            new_qso = False
+                            qso['ts'] =  log_qso['ts']
                         
-                statusPath = stationPath + '/status.json'
-                statusData = loadJSON(statusPath)
-                ts = dt.timestamp() + tzOffset()
-                if ('freq' not in statusData or statusData['freq']['ts'] < ts):
-                    statusData['freq'] = {'value': qso['freq'], 'ts': ts} 
-                    with open(statusPath, 'w' ) as f:
-                        json.dump(statusData, f, ensure_ascii = False )
+                if new_qso:
+                    statusPath = stationPath + '/status.json'
+                    statusData = loadJSON(statusPath)
+                    ts = dt.timestamp() + tzOffset()
+                    if ('freq' not in statusData or statusData['freq']['ts'] < ts):
+                        statusData['freq'] = {'value': qso['freq'], 'ts': ts} 
+                        with open(statusPath, 'w' ) as f:
+                            json.dump(statusData, f, ensure_ascii = False )
 
-                qso['ts'] = time.time()
-                log.insert( 0, qso )
-                yield from dbInsertQso(callsign, qso)
-                with open( logPath, 'w' ) as f:
-                    json.dump( log, f )
+                    qso['ts'] = time.time()
+                    log.insert( 0, qso )
+                    yield from dbInsertQso(callsign, qso)
+                    with open( logPath, 'w' ) as f:
+                        json.dump( log, f )
                 
             return {'ts': qso['ts']}
 
