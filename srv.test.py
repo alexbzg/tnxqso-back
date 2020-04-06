@@ -782,6 +782,8 @@ def logHandler(request):
 
     if 'qso' in data:
 
+        rsp = []
+
         @asyncio.coroutine
         def process_qso(qso):
             dt = datetime.strptime( qso['ts'], "%Y-%m-%d %H:%M:%S" )
@@ -830,7 +832,6 @@ def logHandler(request):
                 
             return {'ts': qso['ts']}
 
-        rsp = []
         for qso in data['qso']:
             rsp.append((yield from process_qso(qso)))
                 

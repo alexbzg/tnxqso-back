@@ -781,54 +781,61 @@ def logHandler(request):
         log = yield from logFromDB( callsign )        
 
     if 'qso' in data:
-        qso = data['qso']
-        dt = datetime.strptime( qso['ts'], "%Y-%m-%d %H:%M:%S" )
-        qso['date'], qso['time'] = dtFmt( dt )
-        serverTs = qso.pop('serverTs') if 'serverTs' in qso else None
 
-        if serverTs:
-            qso['ts'] = serverTs
-            qsoIdx = [i[0] for i in enumerate(log) if i[1]['ts'] == qso['ts']]
-            if qsoIdx:
-                log[qsoIdx[0]] = qso
+        rsp = []
+
+        @asyncio.coroutine
+        def process_qso(qso):
+            dt = datetime.strptime( qso['ts'], "%Y-%m-%d %H:%M:%S" )
+            qso['date'], qso['time'] = dtFmt( dt )
+            serverTs = qso.pop('serverTs') if 'serverTs' in qso else None
+
+            if serverTs:
+                qso['ts'] = serverTs
+                qsoIdx = [i[0] for i in enumerate(log) if i[1]['ts'] == qso['ts']]
+                if qsoIdx:
+                    log[qsoIdx[0]] = qso
+                else:
+                    log.append(qso)
+                dbUpdate = yield from db.execute("""
+                    update log set qso = %(qso)s
+                    where callsign = %(callsign)s and (qso->>'ts')::float = %(ts)s""",
+                    {'callsign': callsign, 'ts': qso['ts'], 'qso': json.dumps(qso)})
+                if not dbUpdate:
+                    yield from dbInsertQso(callsign, qso)
+
             else:
-                log.append(qso)
-            dbUpdate = yield from db.execute("""
-                update log set qso = %(qso)s
-                where callsign = %(callsign)s and (qso->>'ts')::float = %(ts)s""",
-                {'callsign': callsign, 'ts': qso['ts'], 'qso': json.dumps(qso)})
-            logging.debug("Update result: " + str(dbUpdate))
-            if not dbUpdate:
+                if log:
+                    for log_qso in log:
+                        sameFl = True
+                        for key in qso:
+                            if key not in ('ts', 'rda', 'wff', 'comments', 'serverTs')\
+                                and (key not in log_qso or qso[key] != log_qso[key]):
+                                sameFl = False
+                                break
+                        if sameFl:
+                            return web.json_response({'ts': log_qso['ts']})
+                        
+                statusPath = stationPath + '/status.json'
+                statusData = loadJSON(statusPath)
+                ts = dt.timestamp() + tzOffset()
+                if ('freq' not in statusData or statusData['freq']['ts'] < ts):
+                    statusData['freq'] = {'value': qso['freq'], 'ts': ts} 
+                    with open(statusPath, 'w' ) as f:
+                        json.dump(statusData, f, ensure_ascii = False )
+
+                qso['ts'] = time.time()
+                log.insert( 0, qso )
                 yield from dbInsertQso(callsign, qso)
-
-        else:
-            if log:
-                for log_qso in log:
-                    sameFl = True
-                    for key in qso:
-                        if key not in ('ts', 'rda', 'wff', 'comments', 'serverTs')\
-                            and (key not in log_qso or qso[key] != log_qso[key]):
-                            sameFl = False
-                            break
-                    if sameFl:
-                        return web.json_response({'ts': log_qso['ts']})
-                       
-            statusPath = stationPath + '/status.json'
-            statusData = loadJSON(statusPath)
-            ts = dt.timestamp() + tzOffset()
-            if ('freq' not in statusData or statusData['freq']['ts'] < ts):
-                statusData['freq'] = {'value': qso['freq'], 'ts': ts} 
-                with open(statusPath, 'w' ) as f:
-                    json.dump(statusData, f, ensure_ascii = False )
-
-            qso['ts'] = time.time()
-            log.insert( 0, qso )
-            yield from dbInsertQso(callsign, qso)
-            with open( logPath, 'w' ) as f:
-                json.dump( log, f )
-            rsp = {'ts': qso['ts']}
+                with open( logPath, 'w' ) as f:
+                    json.dump( log, f )
                 
-            return web.json_response(rsp)
+            return {'ts': qso['ts']}
+
+        for qso in data['qso']:
+            rsp.append((yield from process_qso(qso)))
+                
+        return web.json_response(rsp)
 
     if 'delete' in data:
         log = [x for x in log if x['ts'] != data['delete']]
@@ -849,7 +856,6 @@ def logHandler(request):
 
 def replace0( val ):
     return val.replace( "0", u"\u00D8" )
-
 
 @asyncio.coroutine
 def chatHandler(request):
