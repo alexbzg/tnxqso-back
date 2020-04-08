@@ -3,7 +3,7 @@
 
 import argparse, asyncio, logging, logging.handlers, aiohttp, jwt, os, base64, \
         json, time, math, smtplib, shutil, io, zipfile, pwd, grp, uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from aiohttp import web
 from wand.image import Image
 from wand.color import Color
@@ -788,6 +788,7 @@ def logHandler(request):
         def process_qso(qso):
             dt = datetime.strptime( qso['ts'], "%Y-%m-%d %H:%M:%S" )
             qso['date'], qso['time'] = dtFmt( dt )
+            qso['qso_ts'] = (dt - datetime(1970, 1, 1)) / timedelta(seconds=1)
             serverTs = qso.pop('serverTs') if 'serverTs' in qso else None
 
             if serverTs:
@@ -810,13 +811,15 @@ def logHandler(request):
                     for log_qso in log:
                         sameFl = True
                         for key in qso:
-                            if key not in ('ts', 'rda', 'wff', 'comments', 'serverTs')\
+                            if key not in ('ts', 'rda', 'wff', 'comments', 'serverTs', 'qso_ts', 'qth', 'no')\
                                 and (key not in log_qso or qso[key] != log_qso[key]):
                                 sameFl = False
                                 break
                         if sameFl:
+                            logging.debug('prev qso found:')
                             new_qso = False
                             qso['ts'] =  log_qso['ts']
+                            log_qso['qso_ts'] = qso['qso_ts']
                         
                 if new_qso:
                     statusPath = stationPath + '/status.json'
@@ -828,6 +831,8 @@ def logHandler(request):
                             json.dump(statusData, f, ensure_ascii = False )
 
                     qso['ts'] = time.time()
+                    while [x for x in log if x['ts'] == qso['ts']]:
+                        qso['ts'] += 0.00000001
                     log.insert( 0, qso )
                     yield from dbInsertQso(callsign, qso)
                 
@@ -836,7 +841,8 @@ def logHandler(request):
         for qso in data['qso']:
             rsp.append((yield from process_qso(qso)))
 
-        log = sorted(log, key=lambda qso: qso['date'] + ' ' + qso['time'])
+        log = sorted(log, key=lambda qso: qso['qso_ts'] if 'qso_ts' in qso else qso['ts']/10,\
+                reverse=True)
         with open( logPath, 'w' ) as f:
             json.dump( log, f )
                 
