@@ -830,13 +830,15 @@ def logHandler(request):
                     qso['ts'] = time.time()
                     log.insert( 0, qso )
                     yield from dbInsertQso(callsign, qso)
-                    with open( logPath, 'w' ) as f:
-                        json.dump( log, f )
                 
             return {'ts': qso['ts']}
 
         for qso in data['qso']:
             rsp.append((yield from process_qso(qso)))
+
+        log = sorted(log, key=lambda qso: qso['date'] + ' ' + qso['time'])
+        with open( logPath, 'w' ) as f:
+            json.dump( log, f )
                 
         return web.json_response(rsp)
 
