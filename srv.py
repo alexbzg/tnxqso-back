@@ -16,6 +16,7 @@ import clusterProtocol
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
+import encodings.idna
 import requests
 import ffmpeg
 import countries
@@ -90,15 +91,13 @@ def empty_qth_fields(country=None):
             data['titles'][idx] = QTH_PARAMS['countries'][country]['fields'][idx]
     return data
 
-@asyncio.coroutine
-def checkRecaptcha( response ):
+async def checkRecaptcha( response ):
     try:
         rcData = { 'secret': conf.get( 'recaptcha', 'secret' ),\
                 'response': response }
-        with aiohttp.ClientSession() as session:
-            resp = yield from session.post( \
-                    conf.get( 'recaptcha', 'verifyURL' ), data = rcData )
-            respData = yield from resp.json()
+        async with aiohttp.ClientSession() as session:
+            resp = await session.post(conf.get('recaptcha', 'verifyURL' ), data = rcData)
+            respData = await resp.json()
             return respData['success']
     except Exception:
         logging.exception( 'Recaptcha error' )
@@ -402,7 +401,7 @@ def wfs_query(type, location, strict=False):
         'addParams': '' if strict else ',0.0015,kilometers'\
         }
     try:
-        rsp = requests.get(url.format_map(url_params), verify=False, timeout=(0.1, 1))
+        rsp = requests.get(url.format_map(url_params), verify=False, timeout=(0.2, 1))
         tag = '<cite:' + params['tag'] + '>'
         data = rsp.text
         result = []
@@ -768,6 +767,11 @@ def logHandler(request):
     callsign = decodeToken( data )
     if not isinstance( callsign, str ):
         return callsign
+
+    logging.info('callsign: ' + callsign)
+    logging.info('QSO data:')
+    logging.info(data)
+
     stationPath = yield from getStationPathByAdminCS( callsign )
     logPath = stationPath + '/log.json'
     log = []
