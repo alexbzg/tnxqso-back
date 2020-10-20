@@ -627,14 +627,14 @@ def exportAdifHandler(request):
                 adif_field("RST_RCVD", qso['rcv']) +\
                 adif_field("RST_SENT", qso['snt']) +\
                 adif_field("MY_GRIDSQUARE", qso['loc']) +\
-                adif_field("GRIDSQUARE", qso['loc_rcv'])
+                adif_field("GRIDSQUARE", qso['loc_rcv'] if 'loc_rcv' in qso else None)
         for field_no, val in enumerate(qso['qth']):
             adif += adif_field('QTH_FIELD_' + str(field_no + 1), val)
         adif += "<EOR>\n"
 
     return web.Response(
             headers={'Content-Disposition': 'Attachment;filename=' +\
-                    callsign + '.adi'},\
+                    callsign + datetime.now().strftime('_%d_%b_%Y') +'.adi'},\
             body=adif.encode())
 
 @asyncio.coroutine
