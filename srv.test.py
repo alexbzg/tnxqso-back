@@ -4,6 +4,7 @@
 import argparse, asyncio, logging, logging.handlers, aiohttp, jwt, os, base64, \
         json, time, math, smtplib, shutil, io, zipfile, pwd, grp, uuid
 from datetime import datetime, timedelta
+from decimal import *
 from aiohttp import web
 from wand.image import Image
 from wand.color import Color
@@ -602,6 +603,41 @@ def locator(location):
     return (qth, sfx)
 
 @asyncio.coroutine
+def exportAdifHandler(request):
+    callsign = request.match_info.get('callsign', None)
+    log = yield from logFromDB(callsign)
+
+    adif = """ADIF Export from TNXLOG
+    Logs generated @ """ + time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()) + "\n<EOH>\n"
+
+    def adif_field(name, data):
+        data_str = str(data) if data else ''
+        return "<" + name.upper() + ":" + str(len(data_str)) + ">" + data_str + " "
+
+    for qso in log:
+        qso_time = time.gmtime(qso['qso_ts'])
+        adif += adif_field("CALL", qso['cs']) +\
+                adif_field("QSO_DATE", time.strftime("%Y%m%d", qso_time)) +\
+                adif_field("TIME_OFF", time.strftime("%H%M%S", qso_time)) +\
+                adif_field("TIME_ON", time.strftime("%H%M%S", qso_time)) +\
+                adif_field("BAND", qso['band']) +\
+                adif_field("STATION_CALLSIGN", qso['myCS']) +\
+                adif_field("FREQ", str(Decimal(qso['freq'])/1000)) +\
+                adif_field("MODE", qso['mode']) +\
+                adif_field("RST_RCVD", qso['rcv']) +\
+                adif_field("RST_SENT", qso['snt']) +\
+                adif_field("MY_GRIDSQUARE", qso['loc']) +\
+                adif_field("GRIDSQUARE", qso['loc_rcv'])
+        for field_no, val in enumerate(qso['qth']):
+            adif += adif_field('QTH_FIELD_' + str(field_no + 1), val)
+        adif += "<EOR>\n"
+
+    return web.Response(
+            headers={'Content-Disposition': 'Attachment;filename=' +\
+                    callsign + '.adi'},\
+            body=adif.encode())
+
+@asyncio.coroutine
 def newsHandler(request):
     data = yield from request.json()
     callsign = decodeToken( data )
@@ -1026,6 +1062,8 @@ if __name__ == '__main__':
     app.router.add_post('/aiohttp/userData', userDataHandler )
     app.router.add_post('/aiohttp/gallery', galleryHandler )
     app.router.add_post('/aiohttp/sendSpot', sendSpotHandler )
+    app.router.add_get('/aiohttp/adif/{callsign}', exportAdifHandler)
+
     db.verbose = True
     asyncio.async( db.connect() )
 
