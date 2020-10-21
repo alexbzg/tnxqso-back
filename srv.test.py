@@ -602,6 +602,10 @@ def locator(location):
     sfx += chr(48 + int(lat))
     return (qth, sfx)
 
+BANDS_WL = {'1.8': '160M', '3.5': '80M', '7': '40M', \
+        '10': '30M', '14': '20M', '20': '14M', '18': '17M', '21': '15M', \
+        '24': '12M', '28': '10M', '50': '6M', '144': '2M'}
+
 @asyncio.coroutine
 def exportAdifHandler(request):
     callsign = request.match_info.get('callsign', None)
@@ -620,7 +624,7 @@ def exportAdifHandler(request):
                 adif_field("QSO_DATE", time.strftime("%Y%m%d", qso_time)) +\
                 adif_field("TIME_OFF", time.strftime("%H%M%S", qso_time)) +\
                 adif_field("TIME_ON", time.strftime("%H%M%S", qso_time)) +\
-                adif_field("BAND", qso['band']) +\
+                adif_field("BAND", BANDS_WL[qso['band']]) +\
                 adif_field("STATION_CALLSIGN", qso['myCS']) +\
                 adif_field("FREQ", str(Decimal(qso['freq'])/1000)) +\
                 adif_field("MODE", qso['mode']) +\
