@@ -6,7 +6,7 @@ from common import loadJSON
 
 rafa = {}
 
-rafa_rsp = requests.get('https://api.hamlog.ru/rafa/rafalist.php')
+rafa_rsp = requests.get('https://hamlog.online/api/v1/rafa/rafalist/')
 rafa_rsp.raise_for_status()
 rafa_json = rafa_rsp.json()
 with open('/usr/local/tnxqso/rafa.csv', 'w') as f_out:

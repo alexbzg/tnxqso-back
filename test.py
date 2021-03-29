@@ -36,7 +36,7 @@ print(rsp.text)
 
 print("Login tests")
 rsp = requests.post('https://' + pfx + 'tnxqso.com/aiohttp/login',\
-        data=json.dumps({'login': 'qqqq', 'password': '11111111'}))
+        data=json.dumps({'login': 'ADM111N', 'password': '11111111'}))
 rsp.raise_for_status()
 print(rsp.text)
 token = json.loads(rsp.text)['token']

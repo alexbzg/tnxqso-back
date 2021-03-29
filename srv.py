@@ -475,6 +475,8 @@ def locationHandler( request ):
             return callsign
         stationPath = yield from getStationPathByAdminCS( callsign )
         stationSettings = loadJSON(stationPath + '/settings.json')
+        if not stationSettings:
+            return web.HTTPBadRequest(text='Expedition profile is not initialized.')
         if stationSettings and 'station' in stationSettings and\
             'callsign' in stationSettings['station'] and\
             stationSettings['station']['callsign'] and\
@@ -561,8 +563,11 @@ def locationHandler( request ):
             d = c * 6373            
             data['d'] = d
             data['dt'] = data['locTs'] - data['prev']['ts']
-            data['speed'] = d / ( float( data['locTs'] - data['prev']['ts'] ) \
-                    / 3600 )
+            if float( data['locTs'] - data['prev']['ts'] ) != 0:
+                data['speed'] = d / ( float( data['locTs'] - data['prev']['ts'] ) \
+                        / 3600 )
+            else:
+                data['speed'] = 0
 
     if 'qth' in newData:
  
@@ -620,18 +625,23 @@ def exportAdifHandler(request):
 
     for qso in log:
         qso_time = time.gmtime(qso['qso_ts'])
-        adif += adif_field("CALL", qso['cs']) +\
-                adif_field("QSO_DATE", time.strftime("%Y%m%d", qso_time)) +\
-                adif_field("TIME_OFF", time.strftime("%H%M%S", qso_time)) +\
-                adif_field("TIME_ON", time.strftime("%H%M%S", qso_time)) +\
-                adif_field("BAND", BANDS_WL[qso['band']]) +\
-                adif_field("STATION_CALLSIGN", qso['myCS']) +\
-                adif_field("FREQ", str(Decimal(qso['freq'])/1000)) +\
-                adif_field("MODE", qso['mode']) +\
-                adif_field("RST_RCVD", qso['rcv']) +\
-                adif_field("RST_SENT", qso['snt']) +\
-                adif_field("MY_GRIDSQUARE", qso['loc']) +\
-                adif_field("GRIDSQUARE", qso['loc_rcv'] if 'loc_rcv' in qso else None)
+        try:
+            adif += adif_field("CALL", qso['cs']) +\
+                    adif_field("QSO_DATE", time.strftime("%Y%m%d", qso_time)) +\
+                    adif_field("TIME_OFF", time.strftime("%H%M%S", qso_time)) +\
+                    adif_field("TIME_ON", time.strftime("%H%M%S", qso_time)) +\
+                    adif_field("BAND", BANDS_WL[qso['band']]) +\
+                    adif_field("STATION_CALLSIGN", qso['myCS']) +\
+                    adif_field("FREQ", str(Decimal(qso['freq'])/1000)) +\
+                    adif_field("MODE", qso['mode']) +\
+                    adif_field("RST_RCVD", qso['rcv']) +\
+                    adif_field("RST_SENT", qso['snt']) +\
+                    adif_field("MY_GRIDSQUARE", qso['loc']) +\
+                    adif_field("GRIDSQUARE", qso['loc_rcv'] if 'loc_rcv' in qso else None)
+        except Exception:
+            logging.exception('Error while adif conversion. QSO:')
+            logging.error(qso)
+
         for field_no, val in enumerate(qso['qth']):
             adif += adif_field('QTH_FIELD_' + str(field_no + 1), val)
         adif += "<EOR>\n"
@@ -765,7 +775,19 @@ def galleryHandler(request):
         with Image(filename=tnSrc) as img:
             with Image(width=img.width, height=img.height,
                     background=Color("#EEEEEE")) as bg:
+
                 bg.composite(img, 0, 0)
+
+                exif = {}
+                exif.update((k[5:], v) for k, v in img.metadata.items() if k.startswith('exif:'))
+                print(exif['Orientation'])
+                if exif['Orientation'] == '3': 
+                    bg.rotate(180)
+                elif exif['Orientation'] == '6': 
+                    bg.rotate(90)
+                elif exif['Orientation'] == '8': 
+                    bg.rotate(270)
+
                 size = img.width if img.width < img.height else img.height
                 bg.crop(width=size, height=size, gravity='north')
                 bg.resize(200, 200)
