@@ -780,13 +780,13 @@ def galleryHandler(request):
 
                 exif = {}
                 exif.update((k[5:], v) for k, v in img.metadata.items() if k.startswith('exif:'))
-                print(exif['Orientation'])
-                if exif['Orientation'] == '3': 
-                    bg.rotate(180)
-                elif exif['Orientation'] == '6': 
-                    bg.rotate(90)
-                elif exif['Orientation'] == '8': 
-                    bg.rotate(270)
+                if 'Orientation' in exif:
+                    if exif['Orientation'] == '3': 
+                        bg.rotate(180)
+                    elif exif['Orientation'] == '6': 
+                        bg.rotate(90)
+                    elif exif['Orientation'] == '8': 
+                        bg.rotate(270)
 
                 size = img.width if img.width < img.height else img.height
                 bg.crop(width=size, height=size, gravity='north')
