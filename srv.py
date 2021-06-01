@@ -823,6 +823,7 @@ def galleryHandler(request):
             'caption': data['caption'],
             'type': fileType,
             'ts': time.time(),
+            'datetime': datetime.utcnow().strftime('%d %b %Y %H:%M').lower(),
             'id': fileNameBase})
         max_count = int(site_gallery_params['max_count'])
         if len(galleryData) > max_count:
