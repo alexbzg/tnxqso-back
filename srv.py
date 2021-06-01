@@ -37,7 +37,7 @@ startLogging(\
     'srv_test' if args.test else 'srv',\
     logging.DEBUG if args.test else logging.INFO)
 logging.debug( "restart" )
-    
+     
 db = DBConn( conf.items( 'db_test' if args.test else 'db' ) )
 db.connect()
 
@@ -471,9 +471,12 @@ def locationHandler( request ):
     stationCallsign = None
     if ('token' in newData and newData['token']):
         callsign = decodeToken( newData )
+        logging.debug('--------------------Location handler--------------')
+        logging.debug('callsign: %s', callsign)
         if not isinstance( callsign, str ):
             return callsign
         stationPath = yield from getStationPathByAdminCS( callsign )
+        logging.debug('station path: %s', stationPath)
         stationSettings = loadJSON(stationPath + '/settings.json')
         if not stationSettings:
             return web.HTTPBadRequest(text='Expedition profile is not initialized.')
@@ -484,15 +487,23 @@ def locationHandler( request ):
             stationSettings['station']['activityPeriod']:
                 act_period = [datetime.strptime(dt, '%d.%m.%Y') for dt in\
                     stationSettings['station']['activityPeriod']]
+                logging.debug('activity: %s', act_period)
                 if act_period[0] <= datetime.utcnow() <= act_period[1] +\
                     timedelta(days=1):
                     stationCallsign = stationSettings['station']['callsign']
+                logging.debug('station callsign: %s', stationCallsign)
+
+    logging.debug('newData: %s', newData)
+
     if 'location' in newData and newData['location']:
         qth_now_cs = None
         if 'callsign' in newData and newData['callsign']:
             qth_now_cs = newData['callsign']
         elif stationCallsign:
             qth_now_cs = stationCallsign
+
+        logging.debug('qthnow callsign: %s', qth_now_cs)
+
         if qth_now_cs:
             qth_now_cs = qth_now_cs.upper()
             qth_now_locations_path = webRoot + '/js/qth_now_locations.json'
@@ -578,6 +589,8 @@ def locationHandler( request ):
             data['qth']['fields']['values'][int(key)] = newData['qth']['fields'][key]
         if 'loc' in newData['qth']:
             data['qth']['loc'] = newData['qth']['loc']
+
+    logging.debug('new status: %s', data)
             
     with open( fp, 'w' ) as f:
         json.dump( data, f, ensure_ascii = False )
@@ -1035,8 +1048,15 @@ def insertChatMessage(path, msg_data, admin):
     if 'name' in msg_data:
         msg['name'] = msg_data['name']
     chat.insert(0, msg)
-    if len( chat ) > 100:
-        chat = chat[:100]
+    chat_pinned, chat_common = [], []
+    for msg in chat:
+        if msg['text'].startswith('***'):
+            chat_pinned.append(msg)
+        else:
+            chat_common.append(msg)
+    if len(chat_common) > 100:
+        chat_common = chat_common[:100]
+    chat = chat_pinned + chat_common
     with open(path, 'w') as f:
         json.dump(chat, f, ensure_ascii = False)
 
@@ -1072,7 +1092,7 @@ def sendSpotHandler(request):
  
  
 if __name__ == '__main__':
-    app = web.Application( client_max_size = 100 * 1024 ** 2 )
+    app = web.Application( client_max_size = 200 * 1024 ** 2 )
     app.router.add_post('/aiohttp/login', loginHandler)
     app.router.add_post('/aiohttp/userSettings', userSettingsHandler)
     app.router.add_post('/aiohttp/news', newsHandler)
