@@ -462,6 +462,28 @@ def get_qth_data(location, country=None):
 
     return data
 
+def save_qth_now_location(cs, location, path):
+    qth_now_locations = loadJSON(path)
+    if not qth_now_locations:
+        qth_now_locations = []
+    ts = int(time.time())
+    dtUTC = datetime.utcnow()
+    dt, tm = dtFmt(dtUTC)    
+    qth_now_locations = [item for item in qth_now_locations\
+        if ts - item['ts'] < 600 and\
+        (item['location'][0] != location[0] or\
+            item['location'][1] != location[1])\
+        and (cs == None or item['callsign'] != cs)]
+    qth_now_locations.append({
+        'location': location, 
+        'ts': ts,
+        'date': dt,
+        'time': tm,
+        'callsign': cs
+    })
+    with open(path, 'w') as f:
+        json.dump(qth_now_locations, f, ensure_ascii = False)
+
 @asyncio.coroutine
 def locationHandler( request ):
     newData = yield from request.json()
@@ -502,31 +524,14 @@ def locationHandler( request ):
         elif stationCallsign:
             qth_now_cs = stationCallsign
 
-        logging.debug('qthnow callsign: %s', qth_now_cs)
-
         if qth_now_cs:
             qth_now_cs = qth_now_cs.upper()
-            qth_now_locations_path = webRoot + '/js/qth_now_locations.json'
-            qth_now_locations = loadJSON(qth_now_locations_path)
-            if not qth_now_locations:
-                qth_now_locations = []
-            ts = int(time.time())
-            dtUTC = datetime.utcnow()
-            dt, tm = dtFmt(dtUTC)    
-            qth_now_locations = [item for item in qth_now_locations\
-                if ts - item['ts'] < 600 and\
-                (item['location'][0] != newData['location'][0] or\
-                    item['location'][1] != newData['location'][1])\
-                and item['callsign'] != qth_now_cs]
-            qth_now_locations.append({
-                'location': newData['location'], 
-                'ts': ts,
-                'date': dt,
-                'time': tm,
-                'callsign': qth_now_cs.upper()
-            })
-            with open(qth_now_locations_path, 'w' ) as f:
-                json.dump(qth_now_locations, f, ensure_ascii = False)
+            save_qth_now_location(qth_now_cs, newData['location'],\
+                webRoot + '/js/qth_now_locations.json')
+
+        save_qth_now_location(qth_now_cs, newData['location'],\
+            webRoot + '/js/qth_now_locations_all.json')
+
     if ('token' not in newData or not newData['token']) and 'location' in newData:
         qth = yield from get_qth_data(newData['location'])
         return web.json_response({'qth': qth})
@@ -1049,15 +1054,16 @@ def insertChatMessage(path, msg_data, admin):
     if 'name' in msg_data:
         msg['name'] = msg_data['name']
     chat.insert(0, msg)
-    chat_pinned, chat_common = [], []
-    for msg in chat:
-        if msg['text'].startswith('***'):
-            chat_pinned.append(msg)
-        else:
-            chat_common.append(msg)
-    if len(chat_common) > 100:
-        chat_common = chat_common[:100]
-    chat = chat_pinned + chat_common
+    if len(chat) > 100:
+        chat_trunc = []
+        chat_co = 0
+        for msg in chat:
+            chat_trunc.append(msg)
+            if not msg['text'].startswith('***'):
+                chat_co += 1
+                if chat_co >= 100:
+                    break
+        chat = chat_trunc
     with open(path, 'w') as f:
         json.dump(chat, f, ensure_ascii = False)
 
