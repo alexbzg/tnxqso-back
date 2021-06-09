@@ -493,12 +493,9 @@ def locationHandler( request ):
     stationCallsign = None
     if ('token' in newData and newData['token']):
         callsign = decodeToken( newData )
-        logging.debug('--------------------Location handler--------------')
-        logging.debug('callsign: %s', callsign)
         if not isinstance( callsign, str ):
             return callsign
         stationPath = yield from getStationPathByAdminCS( callsign )
-        logging.debug('station path: %s', stationPath)
         stationSettings = loadJSON(stationPath + '/settings.json')
         if not stationSettings:
             return web.HTTPBadRequest(text='Expedition profile is not initialized.')
@@ -508,14 +505,10 @@ def locationHandler( request ):
             'activityPeriod' in stationSettings['station'] and\
             stationSettings['station']['activityPeriod']:
                 act_period = [datetime.strptime(dt, '%d.%m.%Y') for dt in\
-                    stationSettings['station']['activityPeriod']]
-                logging.debug('activity: %s', act_period)
-                if act_period[0] <= datetime.utcnow() <= act_period[1] +\
-                    timedelta(days=1):
+                    stationSettings['station']['activityPeriod'] if dt]
+                if act_period and act_period[0] <= datetime.utcnow() <=\
+                    act_period[1] + timedelta(days=1):
                     stationCallsign = stationSettings['station']['callsign']
-                logging.debug('station callsign: %s', stationCallsign)
-
-    logging.debug('newData: %s', newData)
 
     if 'location' in newData and newData['location']:
         qth_now_cs = None
@@ -523,6 +516,7 @@ def locationHandler( request ):
             qth_now_cs = newData['callsign']
         elif stationCallsign:
             qth_now_cs = stationCallsign
+        logging.info('map callsign: %s' % qth_now_cs)
 
         if qth_now_cs:
             qth_now_cs = qth_now_cs.upper()
@@ -595,8 +589,6 @@ def locationHandler( request ):
         if 'loc' in newData['qth']:
             data['qth']['loc'] = newData['qth']['loc']
 
-    logging.debug('new status: %s', data)
-            
     with open( fp, 'w' ) as f:
         json.dump( data, f, ensure_ascii = False )
     return web.json_response(data)
