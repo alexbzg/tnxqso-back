@@ -404,7 +404,7 @@ def wfs_query(type, location, strict=False):
         'predi': 'INTERSECTS' if strict else 'DWITHIN',\
         'lat': location[0],\
         'lng': location[1],\
-        'addParams': '' if strict else ',0.0015,kilometers'\
+        'addParams': '' if strict else ',0.0025,kilometers' # ~250 meters
         }
     try:
         rsp = requests.get(url.format_map(url_params), verify=False, timeout=(0.2, 1))

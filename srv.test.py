@@ -32,6 +32,7 @@ conf = siteConf()
 webRoot = conf.get( 'web', 'root_test' if args.test else 'root' )
 webAddress = conf.get( 'web', 'address_test' if args.test else 'address' )
 siteAdmins = conf.get( 'web', 'admins' ).split( ' ' )
+imUsers = conf.get( 'web', 'im_users' ).split( ' ' )
 
 startLogging(\
     'srv_test' if args.test else 'srv',\
@@ -91,6 +92,8 @@ def empty_qth_fields(country=None):
         for idx in range(0, len(QTH_PARAMS['countries'][country]['fields'])):
             data['titles'][idx] = QTH_PARAMS['countries'][country]['fields'][idx]
     return data
+
+IM_QUEUE = {}
 
 async def checkRecaptcha( response ):
     try:
@@ -404,7 +407,7 @@ def wfs_query(type, location, strict=False):
         'predi': 'INTERSECTS' if strict else 'DWITHIN',\
         'lat': location[0],\
         'lng': location[1],\
-        'addParams': '' if strict else ',0.0015,kilometers'\
+        'addParams': '' if strict else ',0.0025,kilometers' # ~250 meters
         }
     try:
         rsp = requests.get(url.format_map(url_params), verify=False, timeout=(0.2, 1))
@@ -462,6 +465,28 @@ def get_qth_data(location, country=None):
 
     return data
 
+def save_qth_now_location(cs, location, path):
+    qth_now_locations = loadJSON(path)
+    if not qth_now_locations:
+        qth_now_locations = []
+    ts = int(time.time())
+    dtUTC = datetime.utcnow()
+    dt, tm = dtFmt(dtUTC)    
+    qth_now_locations = [item for item in qth_now_locations\
+        if ts - item['ts'] < 600 and\
+        (item['location'][0] != location[0] or\
+            item['location'][1] != location[1])\
+        and (cs == None or item['callsign'] != cs)]
+    qth_now_locations.append({
+        'location': location, 
+        'ts': ts,
+        'date': dt,
+        'time': tm,
+        'callsign': cs
+    })
+    with open(path, 'w') as f:
+        json.dump(qth_now_locations, f, ensure_ascii = False)
+
 @asyncio.coroutine
 def locationHandler( request ):
     newData = yield from request.json()
@@ -471,12 +496,9 @@ def locationHandler( request ):
     stationCallsign = None
     if ('token' in newData and newData['token']):
         callsign = decodeToken( newData )
-        logging.debug('--------------------Location handler--------------')
-        logging.debug('callsign: %s', callsign)
         if not isinstance( callsign, str ):
             return callsign
         stationPath = yield from getStationPathByAdminCS( callsign )
-        logging.debug('station path: %s', stationPath)
         stationSettings = loadJSON(stationPath + '/settings.json')
         if not stationSettings:
             return web.HTTPBadRequest(text='Expedition profile is not initialized.')
@@ -486,14 +508,10 @@ def locationHandler( request ):
             'activityPeriod' in stationSettings['station'] and\
             stationSettings['station']['activityPeriod']:
                 act_period = [datetime.strptime(dt, '%d.%m.%Y') for dt in\
-                    stationSettings['station']['activityPeriod']]
-                logging.debug('activity: %s', act_period)
-                if act_period[0] <= datetime.utcnow() <= act_period[1] +\
-                    timedelta(days=1):
+                    stationSettings['station']['activityPeriod'] if dt]
+                if act_period and act_period[0] <= datetime.utcnow() <=\
+                    act_period[1] + timedelta(days=1):
                     stationCallsign = stationSettings['station']['callsign']
-                logging.debug('station callsign: %s', stationCallsign)
-
-    logging.debug('newData: %s', newData)
 
     if 'location' in newData and newData['location']:
         qth_now_cs = None
@@ -501,32 +519,16 @@ def locationHandler( request ):
             qth_now_cs = newData['callsign']
         elif stationCallsign:
             qth_now_cs = stationCallsign
-
-        logging.debug('qthnow callsign: %s', qth_now_cs)
+        logging.info('map callsign: %s' % qth_now_cs)
 
         if qth_now_cs:
             qth_now_cs = qth_now_cs.upper()
-            qth_now_locations_path = webRoot + '/js/qth_now_locations.json'
-            qth_now_locations = loadJSON(qth_now_locations_path)
-            if not qth_now_locations:
-                qth_now_locations = []
-            ts = int(time.time())
-            dtUTC = datetime.utcnow()
-            dt, tm = dtFmt(dtUTC)    
-            qth_now_locations = [item for item in qth_now_locations\
-                if ts - item['ts'] < 600 and\
-                (item['location'][0] != newData['location'][0] or\
-                    item['location'][1] != newData['location'][1])\
-                and item['callsign'] != qth_now_cs]
-            qth_now_locations.append({
-                'location': newData['location'], 
-                'ts': ts,
-                'date': dt,
-                'time': tm,
-                'callsign': qth_now_cs.upper()
-            })
-            with open(qth_now_locations_path, 'w' ) as f:
-                json.dump(qth_now_locations, f, ensure_ascii = False)
+            save_qth_now_location(qth_now_cs, newData['location'],\
+                webRoot + '/js/qth_now_locations.json')
+
+        save_qth_now_location(qth_now_cs, newData['location'],\
+            webRoot + '/js/qth_now_locations_all.json')
+
     if ('token' not in newData or not newData['token']) and 'location' in newData:
         qth = yield from get_qth_data(newData['location'])
         return web.json_response({'qth': qth})
@@ -590,8 +592,6 @@ def locationHandler( request ):
         if 'loc' in newData['qth']:
             data['qth']['loc'] = newData['qth']['loc']
 
-    logging.debug('new status: %s', data)
-            
     with open( fp, 'w' ) as f:
         json.dump( data, f, ensure_ascii = False )
     return web.json_response(data)
@@ -1017,15 +1017,20 @@ def chatHandler(request):
     else:
         chatPath = webRoot + '/js/talks.json'
         admin = isinstance( callsign, str ) and callsign in siteAdmins
-    if 'clear' in data or 'delete' in data:
+    if ('clear' in data or 'delete' in data or 
+            ('text' in data and data['text'][0] == '@')):
         callsign = decodeToken( data )
         if not isinstance( callsign, str ):
             return callsign
-        admins = siteAdmins + [stationSettings['admin'],] if station else siteAdmins
-        if not callsign in admins:
-            return web.HTTPUnauthorized( \
-                text = 'You must be logged in as station or site admin' )
-    chat = []
+        if 'clear' in data or 'delete' in data:
+            admins = siteAdmins + [stationSettings['admin'],] if station else siteAdmins
+            if not callsign in admins:
+                return web.HTTPUnauthorized( \
+                    text = 'You must be logged in as station or site admin' )
+        else:
+            if not callsign in imUsers:
+                return web.HTTPUnauthorized( \
+                    text = 'You must be logged in as im user' )
     if not 'clear' in data and not 'delete' in data:
         insertChatMessage(path=chatPath, msg_data=data, admin=admin)
     else:
@@ -1038,6 +1043,17 @@ def chatHandler(request):
             json.dump( chat, f, ensure_ascii = False )
     return web.Response( text = 'OK' )
 
+@asyncio.coroutine
+def getInstantMessageHandler(request):
+    data = yield from request.json()
+    rsp = None
+    if data['user'] in IM_QUEUE:
+        rsp = data['user']
+        del IM_QUEUE[data['user']]
+        logging.debug('------- IM_QUEUE -------')
+        logging.debug(IM_QUEUE)
+    return web.json_response(rsp)
+
 def insertChatMessage(path, msg_data, admin):
     chat = loadJSON(path)
     if not chat:
@@ -1046,20 +1062,35 @@ def insertChatMessage(path, msg_data, admin):
             'text': msg_data['text'], \
             'admin': admin, 'ts': time.time() }
     msg['date'], msg['time'] = dtFmt( datetime.utcnow() )
-    if 'name' in msg_data:
-        msg['name'] = msg_data['name']
-    chat.insert(0, msg)
-    chat_pinned, chat_common = [], []
-    for msg in chat:
-        if msg['text'].startswith('***'):
-            chat_pinned.append(msg)
+    if msg['text'][0] == '@':
+        to, txt = msg['text'][0:].split(' ', maxsplit=1)
+        txt = txt.strip()
+        if not txt and to in IM_QUEUE:
+            del IM_QUEUE[to]
         else:
-            chat_common.append(msg)
-    if len(chat_common) > 100:
-        chat_common = chat_common[:100]
-    chat = chat_pinned + chat_common
-    with open(path, 'w') as f:
-        json.dump(chat, f, ensure_ascii = False)
+            IM_QUEUE[to] = {
+                    'user': msg['user'],
+                    'text': txt,
+                    'ts': msg['ts']
+                    }
+            logging.debug('------- IM_QUEUE -------')
+            logging.debug(IM_QUEUE)
+    else:
+        if 'name' in msg_data:
+            msg['name'] = msg_data['name']
+        chat.insert(0, msg)
+        if len(chat) > 100:
+            chat_trunc = []
+            chat_co = 0
+            for msg in chat:
+                chat_trunc.append(msg)
+                if not msg['text'].startswith('***'):
+                    chat_co += 1
+                    if chat_co >= 100:
+                        break
+            chat = chat_trunc
+        with open(path, 'w') as f:
+            json.dump(chat, f, ensure_ascii = False)
 
 @asyncio.coroutine
 def sendSpotHandler(request):
@@ -1109,6 +1140,7 @@ if __name__ == '__main__':
     app.router.add_post('/aiohttp/userData', userDataHandler )
     app.router.add_post('/aiohttp/gallery', galleryHandler )
     app.router.add_post('/aiohttp/sendSpot', sendSpotHandler )
+    app.router.add_post('/aiohttp/instantMessage', getInstantMessageHandler )
     app.router.add_get('/aiohttp/adif/{callsign}', exportAdifHandler)
 
     db.verbose = True
