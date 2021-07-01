@@ -1044,11 +1044,11 @@ def chatHandler(request):
     return web.Response( text = 'OK' )
 
 @asyncio.coroutine
-def getInstantMessageHandler(request):
+def checkInstantMessageHandler(request):
     data = yield from request.json()
     rsp = None
     if data['user'] in IM_QUEUE:
-        rsp = data['user']
+        rsp = IM_QUEUE[data['user']]
         del IM_QUEUE[data['user']]
         logging.debug('------- IM_QUEUE -------')
         logging.debug(IM_QUEUE)
@@ -1063,7 +1063,7 @@ def insertChatMessage(path, msg_data, admin):
             'admin': admin, 'ts': time.time() }
     msg['date'], msg['time'] = dtFmt( datetime.utcnow() )
     if msg['text'][0] == '@':
-        to, txt = msg['text'][0:].split(' ', maxsplit=1)
+        to, txt = msg['text'][1:].split(' ', maxsplit=1)
         txt = txt.strip()
         if not txt and to in IM_QUEUE:
             del IM_QUEUE[to]
@@ -1071,7 +1071,9 @@ def insertChatMessage(path, msg_data, admin):
             IM_QUEUE[to] = {
                     'user': msg['user'],
                     'text': txt,
-                    'ts': msg['ts']
+                    'ts': msg['ts'],
+                    'date': msg['date'],
+                    'time': msg['time']
                     }
             logging.debug('------- IM_QUEUE -------')
             logging.debug(IM_QUEUE)
@@ -1140,7 +1142,7 @@ if __name__ == '__main__':
     app.router.add_post('/aiohttp/userData', userDataHandler )
     app.router.add_post('/aiohttp/gallery', galleryHandler )
     app.router.add_post('/aiohttp/sendSpot', sendSpotHandler )
-    app.router.add_post('/aiohttp/instantMessage', getInstantMessageHandler )
+    app.router.add_post('/aiohttp/instantMessage', checkInstantMessageHandler )
     app.router.add_get('/aiohttp/adif/{callsign}', exportAdifHandler)
 
     db.verbose = True

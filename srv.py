@@ -32,6 +32,7 @@ conf = siteConf()
 webRoot = conf.get( 'web', 'root_test' if args.test else 'root' )
 webAddress = conf.get( 'web', 'address_test' if args.test else 'address' )
 siteAdmins = conf.get( 'web', 'admins' ).split( ' ' )
+imUsers = conf.get( 'web', 'im_users' ).split( ' ' )
 
 startLogging(\
     'srv_test' if args.test else 'srv',\
@@ -91,6 +92,8 @@ def empty_qth_fields(country=None):
         for idx in range(0, len(QTH_PARAMS['countries'][country]['fields'])):
             data['titles'][idx] = QTH_PARAMS['countries'][country]['fields'][idx]
     return data
+
+IM_QUEUE = {}
 
 async def checkRecaptcha( response ):
     try:
@@ -1014,15 +1017,20 @@ def chatHandler(request):
     else:
         chatPath = webRoot + '/js/talks.json'
         admin = isinstance( callsign, str ) and callsign in siteAdmins
-    if 'clear' in data or 'delete' in data:
+    if ('clear' in data or 'delete' in data or 
+            ('text' in data and data['text'][0] == '@')):
         callsign = decodeToken( data )
         if not isinstance( callsign, str ):
             return callsign
-        admins = siteAdmins + [stationSettings['admin'],] if station else siteAdmins
-        if not callsign in admins:
-            return web.HTTPUnauthorized( \
-                text = 'You must be logged in as station or site admin' )
-    chat = []
+        if 'clear' in data or 'delete' in data:
+            admins = siteAdmins + [stationSettings['admin'],] if station else siteAdmins
+            if not callsign in admins:
+                return web.HTTPUnauthorized( \
+                    text = 'You must be logged in as station or site admin' )
+        else:
+            if not callsign in imUsers:
+                return web.HTTPUnauthorized( \
+                    text = 'You must be logged in as im user' )
     if not 'clear' in data and not 'delete' in data:
         insertChatMessage(path=chatPath, msg_data=data, admin=admin)
     else:
@@ -1035,6 +1043,17 @@ def chatHandler(request):
             json.dump( chat, f, ensure_ascii = False )
     return web.Response( text = 'OK' )
 
+@asyncio.coroutine
+def checkInstantMessageHandler(request):
+    data = yield from request.json()
+    rsp = None
+    if data['user'] in IM_QUEUE:
+        rsp = IM_QUEUE[data['user']]
+        del IM_QUEUE[data['user']]
+        logging.debug('------- IM_QUEUE -------')
+        logging.debug(IM_QUEUE)
+    return web.json_response(rsp)
+
 def insertChatMessage(path, msg_data, admin):
     chat = loadJSON(path)
     if not chat:
@@ -1043,21 +1062,37 @@ def insertChatMessage(path, msg_data, admin):
             'text': msg_data['text'], \
             'admin': admin, 'ts': time.time() }
     msg['date'], msg['time'] = dtFmt( datetime.utcnow() )
-    if 'name' in msg_data:
-        msg['name'] = msg_data['name']
-    chat.insert(0, msg)
-    if len(chat) > 100:
-        chat_trunc = []
-        chat_co = 0
-        for msg in chat:
-            chat_trunc.append(msg)
-            if not msg['text'].startswith('***'):
-                chat_co += 1
-                if chat_co >= 100:
-                    break
-        chat = chat_trunc
-    with open(path, 'w') as f:
-        json.dump(chat, f, ensure_ascii = False)
+    if msg['text'][0] == '@':
+        to, txt = msg['text'][1:].split(' ', maxsplit=1)
+        txt = txt.strip()
+        if not txt and to in IM_QUEUE:
+            del IM_QUEUE[to]
+        else:
+            IM_QUEUE[to] = {
+                    'user': msg['user'],
+                    'text': txt,
+                    'ts': msg['ts'],
+                    'date': msg['date'],
+                    'time': msg['time']
+                    }
+            logging.debug('------- IM_QUEUE -------')
+            logging.debug(IM_QUEUE)
+    else:
+        if 'name' in msg_data:
+            msg['name'] = msg_data['name']
+        chat.insert(0, msg)
+        if len(chat) > 100:
+            chat_trunc = []
+            chat_co = 0
+            for msg in chat:
+                chat_trunc.append(msg)
+                if not msg['text'].startswith('***'):
+                    chat_co += 1
+                    if chat_co >= 100:
+                        break
+            chat = chat_trunc
+        with open(path, 'w') as f:
+            json.dump(chat, f, ensure_ascii = False)
 
 @asyncio.coroutine
 def sendSpotHandler(request):
@@ -1107,6 +1142,7 @@ if __name__ == '__main__':
     app.router.add_post('/aiohttp/userData', userDataHandler )
     app.router.add_post('/aiohttp/gallery', galleryHandler )
     app.router.add_post('/aiohttp/sendSpot', sendSpotHandler )
+    app.router.add_post('/aiohttp/instantMessage', checkInstantMessageHandler )
     app.router.add_get('/aiohttp/adif/{callsign}', exportAdifHandler)
 
     db.verbose = True
