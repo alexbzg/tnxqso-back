@@ -1007,6 +1007,7 @@ def chatHandler(request):
     callsign = decodeToken( data )
     chatPath = ''
     station = data['station'] if 'station' in data else None
+    chat = []
     if station:
         stationPath = getStationPath( data['station'] )
         stationSettings = loadJSON( stationPath + '/settings.json' )
@@ -1082,15 +1083,14 @@ def insertChatMessage(path, msg_data, admin):
         if 'name' in msg_data:
             msg['name'] = msg_data['name']
         chat.insert(0, msg)
-        if len(chat) > CHAT_MAX_LENGTH:
-            chat_trunc = []
-            chat_adm = []
-            for msg in chat:
-                if msg['text'].startswith('***'):
-                    chat_adm.append(msg)
-                elif len(chat_trunc) < CHAT_MAX_LENGTH:
-                    chat_trunc.append(msg)
-            chat = chat_adm + chat_trunc
+        chat_trunc = []
+        chat_adm = []
+        for msg in chat:
+            if msg['text'].startswith('***') and msg['admin']:
+                chat_adm.append(msg)
+            elif len(chat_trunc) < CHAT_MAX_LENGTH:
+                chat_trunc.append(msg)
+        chat = chat_adm + chat_trunc
         with open(path, 'w') as f:
             json.dump(chat, f, ensure_ascii = False)
 
