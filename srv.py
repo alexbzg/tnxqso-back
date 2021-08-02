@@ -1055,6 +1055,7 @@ def checkInstantMessageHandler(request):
     return web.json_response(rsp)
 
 def insertChatMessage(path, msg_data, admin):
+    CHAT_MAX_LENGTH = int(conf['chat']['max_length'])
     chat = loadJSON(path)
     if not chat:
         chat = []
@@ -1081,16 +1082,15 @@ def insertChatMessage(path, msg_data, admin):
         if 'name' in msg_data:
             msg['name'] = msg_data['name']
         chat.insert(0, msg)
-        if len(chat) > 100:
+        if len(chat) > CHAT_MAX_LENGTH:
             chat_trunc = []
-            chat_co = 0
+            chat_adm = []
             for msg in chat:
-                chat_trunc.append(msg)
-                if not msg['text'].startswith('***'):
-                    chat_co += 1
-                    if chat_co >= 100:
-                        break
-            chat = chat_trunc
+                if msg['text'].startswith('***'):
+                    chat_adm.append(msg)
+                elif len(chat_trunc) < CHAT_MAX_LENGTH:
+                    chat_trunc.append(msg)
+            chat = chat_adm + chat_trunc
         with open(path, 'w') as f:
             json.dump(chat, f, ensure_ascii = False)
 
