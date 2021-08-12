@@ -51,7 +51,7 @@ class DBConn:
     @asyncio.coroutine
     def connect( self ):
         try:
-            self.pool = yield from aiopg.create_pool( self.dsn, \
+            self.pool = yield from aiopg.create_pool( self.dsn, maxsize=3,\
                     on_connect = initConnection  )
             logging.debug( 'db connections pool created' )
         except:

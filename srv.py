@@ -20,7 +20,7 @@ from email.mime.application import MIMEApplication
 import encodings.idna
 import requests
 import ffmpeg
-import countries
+import reverse_geocoder as rg
 
 library.MagickSetCompressionQuality.argtypes = [c_void_p, c_size_t]
 
@@ -74,8 +74,10 @@ with open(appRoot + '/rafa.csv', 'r') as f_rafa:
 app = None
 lastSpotSent = None
 
-country_checker = countries.CountryChecker(appRoot + '/world_borders/TM_WORLD_BORDERS-0.3.shp')
 def get_country(location):
+    data = rg.search(location)
+    if data:
+        return 'RU' if data[0]['cc'] == 'UA' and data[0]['admin1'] == 'Crimea' else data[0]['cc']
     return country_checker.getCountry(countries.Point(location[0], location[1])).iso
 
 WFS_PARAMS = {\
@@ -555,6 +557,8 @@ def locationHandler( request ):
         else None
     if 'location' in newData and newData['location']:
         location = newData['location']
+
+        country = get_country(location)
 
         data['qth'] = yield from get_qth_data(location, country=country)
         
