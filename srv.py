@@ -626,6 +626,10 @@ BANDS_WL = {'1.8': '160M', '3.5': '80M', '7': '40M', \
 @asyncio.coroutine
 def exportAdifHandler(request):
     callsign = request.match_info.get('callsign', None)
+    if callsign:
+        callsign = callsign.replace('-', '/')
+    else:
+        return web.HTTPBadRequest( text = 'No callsign was specified.' )
     log = yield from logFromDB(callsign)
 
     adif = """ADIF Export from TNXLOG
