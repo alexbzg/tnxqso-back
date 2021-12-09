@@ -29,6 +29,11 @@ print("Test RU multiple RDAs")
 rsp = requests.post('https://' + pfx + 'tnxqso.com/aiohttp/location',\
         data=json.dumps({'location': [45.0674, 38.6534]}))
 print(rsp.text)
+print("Test RU country detect glitch")
+rsp = requests.post('https://' + pfx + 'tnxqso.com/aiohttp/location',\
+        data=json.dumps({'location': [60.7117895, 28.7183622]}))
+print(rsp.text)
+
 print("Test UK")
 rsp = requests.post('https://' + pfx + 'tnxqso.com/aiohttp/location',\
         data=json.dumps({'location': [51.7674, -1.2635]}))

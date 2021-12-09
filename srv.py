@@ -177,7 +177,8 @@ def contactHandler(request):
         else:
             userEmail = data['email']
     if not error:
-        sendEmail( text = data['text'], fr = userEmail, \
+        sendEmail(\
+            text=data['text'] + '\n\n' + userEmail, fr=userEmail, \
             to = conf.get( 'email', 'address' ), \
             subject = "tnxqso.com contact message" )
         return web.Response( text = 'OK' )
@@ -429,6 +430,8 @@ def get_qth_data(location, country=None):
 
     if not country:
         country = get_country(location)
+    if country not in ('RU', 'IT', 'GB'):
+        country = 'RU'
 
     data = {'fields': empty_qth_fields(country)}
     data['loc'], data['loc8'] = locator(location)
