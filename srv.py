@@ -928,7 +928,7 @@ def logHandler(request):
                 dt = datetime.strptime( qso['ts'], "%Y-%m-%d %H:%M:%S" )
                 qso['date'], qso['time'] = dtFmt( dt )
                 qso['qso_ts'] = (dt - datetime(1970, 1, 1)) / timedelta(seconds=1)
-            except ValueError as exc:
+            except (ValueError, TypeError) as exc:
                 logging.error("Error parsing qso timestamp" + qso['ts'])
                 logging.exception(exc)
                 return {'ts': None}
