@@ -104,35 +104,31 @@ async def checkRecaptcha( response ):
         logging.exception( 'Recaptcha error' )
         return False
 
-@asyncio.coroutine
-def getUserData( callsign ):
-    return ( yield from db.getObject( 'users', \
+async def getUserData( callsign ):
+    return ( await db.getObject( 'users', \
             { 'callsign': callsign }, False, True ) )
 
 def getStationPath( callsign ):
     return webRoot + '/stations/' + callsign.lower().replace( '/', '-' )
 
-@asyncio.coroutine
-def getStationCallsign( adminCS ):
-    data = yield from getUserData( adminCS )
+async def getStationCallsign( adminCS ):
+    data = await getUserData( adminCS )
     return data['settings']['station']['callsign']
 
-@asyncio.coroutine
-def getStationPathByAdminCS( adminCS ):
-    stationCS = yield from getStationCallsign( adminCS )
+async def getStationPathByAdminCS( adminCS ):
+    stationCS = await getStationCallsign( adminCS )
     return getStationPath( stationCS )
 
-@asyncio.coroutine
-def passwordRecoveryRequestHandler(request):
+async def passwordRecoveryRequestHandler(request):
     error = None
-    data = yield from request.json()
+    data = await request.json()
     userData = False
     if not 'login' in data or len( data['login'] ) < 2:
         error = 'Minimal login length is 2 symbols'
     if not error:
         data['login'] = data['login'].lower()
-        rcTest = yield from checkRecaptcha( data['recaptcha'] )
-        userData = yield from getUserData( data['login'] )
+        rcTest = await checkRecaptcha( data['recaptcha'] )
+        userData = await getUserData( data['login'] )
         if not rcTest:
             error = 'Recaptcha test failed. Please try again'
         else:
@@ -158,20 +154,19 @@ TNXQSO.com support"""
                     return web.Response( text = 'OK' )
     return web.HTTPBadRequest( text = error )
 
-@asyncio.coroutine
-def contactHandler(request):
+async def contactHandler(request):
     error = None
     userEmail = None
-    data = yield from request.json()
+    data = await request.json()
     userData = False
     if 'token' in data:
         callsign = decodeToken( data )
         if not isinstance( callsign, str ):
             return callsign
-        userData = yield from getUserData( callsign )
+        userData = await getUserData( callsign )
         userEmail = userData['email']
     else:
-        rcTest = yield from checkRecaptcha( data['recaptcha'] )
+        rcTest = await checkRecaptcha( data['recaptcha'] )
         if not rcTest:
             error = 'Recaptcha test failed. Please try again'
         else:
@@ -209,10 +204,9 @@ def sendEmail( **email ):
     server.login( conf.get('email', 'login'), conf.get( 'email', 'password' ) )
     server.sendmail( myAddress, msg['to'], str( msg ) )
 
-@asyncio.coroutine
-def loginHandler(request):
+async def loginHandler(request):
     error = None
-    data = yield from request.json()
+    data = await request.json()
     if not isinstance(data, dict):
         logging.error('Wrong login data', data)
         return web.HTTPBadRequest(text = 'Bad login request: ' + str(data))
@@ -223,16 +217,16 @@ def loginHandler(request):
         error = 'Minimal password length is 6 symbols'
     if not error:
         data['login'] = data['login'].lower()
-        userData = yield from getUserData( data['login'] )
+        userData = await getUserData( data['login'] )
         if 'newUser' in data and data['newUser']:
-            rcTest = yield from checkRecaptcha( data['recaptcha'] )
+            rcTest = await checkRecaptcha( data['recaptcha'] )
             if not rcTest:
                 error = 'Recaptcha test failed. Please try again'
             else:
                 if userData:
                     error = 'This callsign is already registered.'
                 else:
-                    userData = yield from db.getObject( 'users', \
+                    userData = await db.getObject( 'users', \
                         { 'callsign': data['login'], \
                         'password': data['password'], \
                         'email': data['email'],
@@ -258,21 +252,19 @@ def loginHandler(request):
             userData['siteAdmin'] = True
         return web.json_response( userData )
 
-@asyncio.coroutine
-def userDataHandler(request):
-    data = yield from request.json()
+async def userDataHandler(request):
+    data = await request.json()
     callsign = decodeToken( data )
     if not isinstance( callsign, str ):
         return callsign
-    userData = yield from getUserData( callsign )
+    userData = await getUserData( callsign )
     del userData['password']
     if callsign in siteAdmins:
         userData['siteAdmin'] = True
     return web.json_response( userData )
 
-@asyncio.coroutine
-def publishHandler(request):
-    data = yield from request.json()
+async def publishHandler(request):
+    data = await request.json()
     callsign = decodeToken( data )
     if not isinstance( callsign, str ):
         return callsign
@@ -291,14 +283,13 @@ def publishHandler(request):
     stationPath = getStationPath( data['station'] )
     stationSettings = loadJSON( stationPath + '/settings.json' )
     stationSettings['publish'] = data['publish']['user']
-    yield from saveStationSettings( data['station'], stationSettings['admin'],
+    await saveStationSettings( data['station'], stationSettings['admin'],
             stationSettings )
     return web.Response( text = 'OK' )
 
-@asyncio.coroutine
-def userSettingsHandler(request):
+async def userSettingsHandler(request):
     error = None
-    data = yield from request.json()
+    data = await request.json()
     error = ''
     okResponse = ''
     dbError = False
@@ -306,7 +297,7 @@ def userSettingsHandler(request):
     if not isinstance( callsign, str ):
         return callsign
     if 'settings' in data:
-        oldData = yield from getUserData( callsign )
+        oldData = await getUserData( callsign )
         cs = oldData['settings']['station']['callsign']
         stationPath = getStationPath( cs ) if cs else None
         publishPath = webRoot + '/js/publish.json'
@@ -341,9 +332,9 @@ def userSettingsHandler(request):
         if stationPath:
             if not os.path.exists( stationPath ):
                 createStationDir( stationPath, callsign )
-        yield from saveStationSettings( cs, callsign, data['settings'] )
+        await saveStationSettings( cs, callsign, data['settings'] )
     elif 'userColumns'in data:
-        userData = yield from getUserData( callsign )
+        userData = await getUserData( callsign )
         settings = userData['settings']
         userColumns = settings['userFields']
         for c in range(0, len( data['userColumns'] ) ):
@@ -352,19 +343,18 @@ def userSettingsHandler(request):
             else:
                 userColumns[c] = data['userColumns'][c]
         userColumns = userColumns[:len( data['userColumns'] )]
-        yield from saveStationSettings( 
+        await saveStationSettings( 
             userData['settings']['station']['callsign'],
             callsign, settings )
     else:
-        yield from db.paramUpdate( 'users', { 'callsign': callsign }, \
+        await db.paramUpdate( 'users', { 'callsign': callsign }, \
             spliceParams( data, ( 'email', 'password' ) ) )
         setFtpPasswd( callsign, data['password'], test = args.test )
     return web.Response( text = 'OK' )
 
-@asyncio.coroutine
-def saveStationSettings( stationCallsign, adminCallsign, settings ):
+async def saveStationSettings( stationCallsign, adminCallsign, settings ):
     settings['admin'] = adminCallsign
-    yield from db.paramUpdate( 'users', { 'callsign': adminCallsign }, \
+    await db.paramUpdate( 'users', { 'callsign': adminCallsign }, \
         { 'settings': json.dumps( settings ) } )
     if stationCallsign:
         stationPath = getStationPath( stationCallsign )
@@ -425,8 +415,7 @@ def wfs_query(type, location, strict=False):
     except requests.exceptions.Timeout:
         return ['-----']
 
-@asyncio.coroutine
-def get_qth_data(location, country=None):
+async def get_qth_data(location, country=None):
 
     if not country:
         country = get_country(location)
@@ -452,7 +441,7 @@ def get_qth_data(location, country=None):
         data['fields']['values'][1] = RAFA_LOCS[data['loc']]\
             if data['loc'] in RAFA_LOCS else None
 
-#        yield from db.execute("""
+#        await db.execute("""
 #            insert into qth_now_locations (lat, lng, rda)
 #            values (%(lat)s, %(lng)s, %(rda)s)""",
 #            {'lat': location[0], 'lng': location[1], 'rda': rda})
@@ -487,9 +476,8 @@ def save_qth_now_location(cs, location, path):
     with open(path, 'w') as f:
         json.dump(qth_now_locations, f, ensure_ascii = False)
 
-@asyncio.coroutine
-def locationHandler( request ):
-    newData = yield from request.json()
+async def locationHandler( request ):
+    newData = await request.json()
     callsign = None
     stationPath = None
     stationSettings = None
@@ -498,7 +486,7 @@ def locationHandler( request ):
         callsign = decodeToken( newData )
         if not isinstance( callsign, str ):
             return callsign
-        stationPath = yield from getStationPathByAdminCS( callsign )
+        stationPath = await getStationPathByAdminCS( callsign )
         stationSettings = loadJSON(stationPath + '/settings.json')
         if not stationSettings:
             return web.HTTPBadRequest(text='Expedition profile is not initialized.')
@@ -530,7 +518,7 @@ def locationHandler( request ):
             webRoot + '/js/qth_now_locations_all.json')
 
     if ('token' not in newData or not newData['token']) and 'location' in newData:
-        qth = yield from get_qth_data(newData['location'])
+        qth = await get_qth_data(newData['location'])
         return web.json_response({'qth': qth})
     fp = stationPath + '/status.json'
     data = loadJSON( fp )
@@ -558,7 +546,7 @@ def locationHandler( request ):
 
         country = get_country(location)
 
-        data['qth'] = yield from get_qth_data(location, country=country)
+        data['qth'] = await get_qth_data(location, country=country)
         
         if 'comments' in newData:
             data['comments'] = newData['comments']
@@ -626,14 +614,13 @@ BANDS_WL = {'1.8': '160M', '3.5': '80M', '7': '40M', \
         '10': '30M', '14': '20M', '20': '14M', '18': '17M', '21': '15M', \
         '24': '12M', '28': '10M', '50': '6M', '144': '2M'}
 
-@asyncio.coroutine
-def exportAdifHandler(request):
+async def exportAdifHandler(request):
     callsign = request.match_info.get('callsign', None)
     if callsign:
         callsign = callsign.replace('-', '/')
     else:
         return web.HTTPBadRequest( text = 'No callsign was specified.' )
-    log = yield from logFromDB(callsign)
+    log = await logFromDB(callsign)
 
     adif = """ADIF Export from TNXLOG
     Logs generated @ """ + time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()) + "\n<EOH>\n"
@@ -670,9 +657,8 @@ def exportAdifHandler(request):
                     callsign + datetime.now().strftime('_%d_%b_%Y') +'.adi'},\
             body=adif.encode())
 
-@asyncio.coroutine
-def newsHandler(request):
-    data = yield from request.json()
+async def newsHandler(request):
+    data = await request.json()
     callsign = decodeToken( data )
     if not isinstance( callsign, str ):
         return callsign
@@ -696,9 +682,8 @@ def newsHandler(request):
         json.dump( news, f, ensure_ascii = False )
     return web.Response( text = 'OK' )
 
-@asyncio.coroutine
-def activeUsersHandler(request):
-    data = yield from request.json()
+async def activeUsersHandler(request):
+    data = await request.json()
     if 'user' not in data:
         return web.Response( text = 'OK' )
     station = data['station'] if 'station' in data else None
@@ -728,15 +713,14 @@ def activeUsersHandler(request):
         logging.error(data)
     return web.Response( text = 'OK' )
 
-@asyncio.coroutine
-def read_multipart(request):
+async def read_multipart(request):
     data = {}
-    reader = yield from request.multipart()
+    reader = await request.multipart()
     while True:
-        field = yield from reader.next()
+        field = await reader.next()
         if not field:
             break
-        contents = yield from field.read()
+        contents = await field.read()
         if field.filename:
             data[field.name] = {\
                 'contents': contents,\
@@ -748,17 +732,16 @@ def read_multipart(request):
                 data[field.name] = None
     return data
         
-@asyncio.coroutine
-def galleryHandler(request):
+async def galleryHandler(request):
     data = None
     if 'multipart/form-data;' in request.headers[aiohttp.hdrs.CONTENT_TYPE]:
-        data = yield from read_multipart(request)
+        data = await read_multipart(request)
     else:
-        data = yield from request.json()
+        data = await request.json()
     callsign = decodeToken( data )
     if not isinstance( callsign, str ):
         return callsign
-    stationPath = yield from getStationPathByAdminCS( callsign )
+    stationPath = await getStationPathByAdminCS( callsign )
     galleryPath = stationPath + '/gallery'
     galleryDataPath = stationPath + '/gallery.json'
     galleryData = loadJSON(galleryDataPath)
@@ -852,13 +835,12 @@ def galleryHandler(request):
 def deleteGalleryItem(stationPath, item):
     os.unlink(stationPath + '/' + item['file'])
 
-@asyncio.coroutine
-def trackHandler(request):
-    data = yield from request.json()
+async def trackHandler(request):
+    data = await request.json()
     callsign = decodeToken( data )
     if not isinstance( callsign, str ):
         return callsign
-    stationPath = yield from getStationPathByAdminCS( callsign )
+    stationPath = await getStationPathByAdminCS( callsign )
     trackJsonPath = stationPath + '/track.json'
     trackJson = { 'version': time.time(), 'file': 'track.xml' }
     if 'file' in data:
@@ -879,10 +861,9 @@ def trackHandler(request):
         os.remove( trackJsonPath )
     return web.Response( text = 'OK' )
 
-@asyncio.coroutine
-def logFromDB(callsign):
+async def logFromDB(callsign):
     log = []
-    data = yield from db.execute( 
+    data = await db.execute( 
         "select id, qso from log where callsign = %(cs)s order by id desc",
             { 'cs': callsign } )
     if data:
@@ -892,21 +873,19 @@ def logFromDB(callsign):
             log = [ row['qso'] for row in data ]
     return log
 
-@asyncio.coroutine
-def dbInsertQso(callsign, qso):
-    yield from db.execute("""
+async def dbInsertQso(callsign, qso):
+    await db.execute("""
         insert into log (callsign, qso) 
         values ( %(callsign)s, %(qso)s )""",
         { 'callsign': callsign, 'qso': json.dumps( qso ) } )
 
-@asyncio.coroutine
-def logHandler(request):
-    data = yield from request.json()
+async def logHandler(request):
+    data = await request.json()
     callsign = decodeToken( data )
     if not isinstance( callsign, str ):
         return callsign
 
-    stationPath = yield from getStationPathByAdminCS( callsign )
+    stationPath = await getStationPathByAdminCS( callsign )
     logPath = stationPath + '/log.json'
     log = []
     if not os.path.isfile( logPath ):
@@ -916,14 +895,13 @@ def logHandler(request):
     except Exception as ex:
         logging.error( "Error loading qso log" + logPath )
         logging.exception( ex )
-        log = yield from logFromDB( callsign )        
+        log = await logFromDB( callsign )        
 
     if 'qso' in data:
 
         rsp = []
 
-        @asyncio.coroutine
-        def process_qso(qso):
+        async def process_qso(qso):
             try:
                 dt = datetime.strptime( qso['ts'], "%Y-%m-%d %H:%M:%S" )
                 qso['date'], qso['time'] = dtFmt( dt )
@@ -942,12 +920,12 @@ def logHandler(request):
                     log[qsoIdx[0]] = qso
                 else:
                     log.append(qso)
-                dbUpdate = yield from db.execute("""
+                dbUpdate = await db.execute("""
                     update log set qso = %(qso)s
                     where callsign = %(callsign)s and (qso->>'ts')::float = %(ts)s""",
                     {'callsign': callsign, 'ts': qso['ts'], 'qso': json.dumps(qso)})
                 if not dbUpdate:
-                    yield from dbInsertQso(callsign, qso)
+                    await dbInsertQso(callsign, qso)
 
             else:
                 new_qso = True  
@@ -978,12 +956,12 @@ def logHandler(request):
                     while [x for x in log if x['ts'] == qso['ts']]:
                         qso['ts'] += 0.00000001
                     log.insert( 0, qso )
-                    yield from dbInsertQso(callsign, qso)
+                    await dbInsertQso(callsign, qso)
                 
             return {'ts': qso['ts']}
 
         for qso in data['qso']:
-            rsp.append((yield from process_qso(qso)))
+            rsp.append((await process_qso(qso)))
 
         log = sorted(log, key=lambda qso: qso['qso_ts'] if 'qso_ts' in qso else qso['ts']/10,\
                 reverse=True)
@@ -994,14 +972,14 @@ def logHandler(request):
 
     if 'delete' in data:
         log = [x for x in log if x['ts'] != data['delete']]
-        yield from db.execute("""
+        await db.execute("""
             delete from log 
             where callsign = %(callsign)s and (qso->>'ts')::float = %(ts)s""",
             {'callsign': callsign, 'ts': data['delete']})
 
     if 'clear' in data:
         log = []
-        yield from db.execute( 
+        await db.execute( 
             "delete from log where callsign = %(callsign)s",
             { 'callsign': callsign } )
 
@@ -1012,9 +990,8 @@ def logHandler(request):
 def replace0( val ):
     return val.replace( "0", u"\u00D8" )
 
-@asyncio.coroutine
-def chatHandler(request):
-    data = yield from request.json()
+async def chatHandler(request):
+    data = await request.json()
     admin = False
     callsign = decodeToken( data )
     chatPath = ''
@@ -1056,9 +1033,8 @@ def chatHandler(request):
             json.dump( chat, f, ensure_ascii = False )
     return web.Response( text = 'OK' )
 
-@asyncio.coroutine
-def checkInstantMessageHandler(request):
-    data = yield from request.json()
+async def checkInstantMessageHandler(request):
+    data = await request.json()
     rsp = None
     if data['user'] in IM_QUEUE:
         rsp = IM_QUEUE[data['user']]
@@ -1106,16 +1082,15 @@ def insertChatMessage(path, msg_data, admin):
         with open(path, 'w') as f:
             json.dump(chat, f, ensure_ascii = False)
 
-@asyncio.coroutine
-def sendSpotHandler(request):
+async def sendSpotHandler(request):
     global lastSpotSent
-    data = yield from request.json()
+    data = await request.json()
     now = datetime.now().timestamp()
     response = { 'sent': False, 
             'secondsLeft': conf.getint( 'cluster', 'spotInterval' ) }
     if not lastSpotSent or now - lastSpotSent > response['secondsLeft']:
         lastSpotSent = now
-        protocol = yield from  clusterProtocol.connect( app.loop, \
+        protocol = await  clusterProtocol.connect( app.loop, \
             call = data['userCS'], 
             host = conf.get( 'cluster', 'host' ),
             port = conf.get( 'cluster', 'port' ) )
@@ -1129,7 +1104,7 @@ def sendSpotHandler(request):
         if protocol:
             logging.debug( 'Protocol connected' )
             protocol.onLoggedIn.append( sendSpot )
-            yield from protocol.waitDisconnected()
+            await protocol.waitDisconnected()
             if not response['sent']:
                 response['reply'] = protocol.latestReply
     else:
