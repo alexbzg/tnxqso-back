@@ -41,7 +41,6 @@ startLogging(\
 logging.debug( "restart" )
      
 db = DBConn( conf.items( 'db_test' if args.test else 'db' ) )
-db.connect()
 
 secret = None
 fpSecret = conf.get( 'files', 'secret' )
@@ -51,7 +50,7 @@ if ( os.path.isfile( fpSecret ) ):
 if not secret:
     secret = base64.b64encode( os.urandom( 64 ) )
     with open( fpSecret, 'wb' ) as fSecret:
-        fSecret.write( str( secret ) )
+        fSecret.write( secret )
 
 defUserSettings = loadJSON( webRoot + '/js/defaultUserSettings.json' )
 if not defUserSettings:
@@ -140,7 +139,7 @@ async def passwordRecoveryRequestHandler(request):
                 else:
                     token = jwt.encode( 
                         { 'callsign': data['login'], 'time': time.time() }, \
-                        secret, algorithm='HS256' ).decode('utf-8')
+                        secret, algorithm='HS256' )
                     text = 'Click on this link to recover your tnxqso.com ' + \
                              'password: ' + webAddress + \
                              '/#/changePassword?token=' + token + """
@@ -246,7 +245,7 @@ async def loginHandler(request):
         return web.HTTPBadRequest( text = error )
     else:
         userData['token'] = jwt.encode( { 'callsign': data['login'] }, \
-                secret, algorithm='HS256' ).decode('utf-8') 
+                secret, algorithm='HS256' )
         del userData['password']
         if data['login'] in siteAdmins:
             userData['siteAdmin'] = True
@@ -1133,7 +1132,11 @@ if __name__ == '__main__':
     app.router.add_get('/aiohttp/adif/{callsign}', exportAdifHandler)
 
     db.verbose = True
-    asyncio.async( db.connect() )
+
+    async def on_startup(app):
+        await db.connect()
+
+    app.on_startup.append(on_startup)
 
     args = parser.parse_args()
-    web.run_app(app, path = conf.get( 'sockets', 'srv_test' if args.test else 'srv' ) )
+    web.run_app(app, path = conf.get('sockets', 'srv'))
