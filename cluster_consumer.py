@@ -16,7 +16,7 @@ def get_data(consumer_id, db_params, all_data=False):
         if ts_prev:
             ts_filter['ts'] = {'$gt': ts_prev}
 
-    data = DB.dx.find(ts_filter).sort('ts', -1)
+    data = list(DB.dx.find(ts_filter).sort('ts', -1))
     if data:
         DB.consumers.update_one({'id': consumer_id}, {'$set': {'last': data[0]['ts']}})
 
