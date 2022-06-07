@@ -762,6 +762,7 @@ async def galleryHandler(request):
         tnSrc = filePath
         width = None
         if fileType == 'video':
+
             tnSrc = galleryPath + '/' + fileNameBase + '.jpeg'
             (
                 ffmpeg
@@ -773,6 +774,7 @@ async def galleryHandler(request):
             video_stream = next((stream for stream in probe['streams']\
                 if stream['codec_type'] == 'video'), None)
             width = int(video_stream['width'])
+
         with Image(filename=tnSrc) as img:
             with Image(width=img.width, height=img.height,
                     background=Color("#EEEEEE")) as bg:
@@ -795,14 +797,15 @@ async def galleryHandler(request):
                 bg.format = 'jpeg'
                 bg.save(filename=galleryPath + '/' + fileNameBase +\
                     '_thumb.jpeg')
-                max_height, max_width = int(site_gallery_params['max_height']), int(site_gallery_params['max_width'])
-                if img.width > max_width or img.height > max_height:
-                    coeff = max_width / img.width
-                    if max_height / img.height < coeff:
-                        coeff = max_height / img.height
-                    img.resize(width=int(coeff * img.width), height=int(coeff * img.height))
-                    img.compression_quality = int(site_gallery_params['quality'])
-                    img.save(filename=filePath)
+                if fileType == 'image':
+                    max_height, max_width = int(site_gallery_params['max_height']), int(site_gallery_params['max_width'])
+                    if img.width > max_width or img.height > max_height:
+                        coeff = max_width / img.width
+                        if max_height / img.height < coeff:
+                            coeff = max_height / img.height
+                        img.resize(width=int(coeff * img.width), height=int(coeff * img.height))
+                        img.compression_quality = int(site_gallery_params['quality'])
+                        img.save(filename=filePath)
         if fileType == 'video':
             os.unlink(tnSrc)
         galleryData.insert(0, {\
