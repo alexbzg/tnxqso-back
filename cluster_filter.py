@@ -52,7 +52,7 @@ for station in [str(x) for x in pathlib.Path( stationsPath ).iterdir() \
                             item_c['highlight'] = True
                             break
                     
-                    stationDX = [x for x in stationDX if x['ts'] >=  item_c['ts'] - 5400
+                    stationDX = [x for x in stationDX if x['ts'] <=  item_c['ts'] - 5400
                         or x['cs'] != item_c['cs'] or not -1 < x['freq'] - item_c['freq'] < 1]
 
                     stationDX.insert(idx, item_c)
