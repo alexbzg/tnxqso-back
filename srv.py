@@ -1004,8 +1004,14 @@ async def chatHandler(request):
         stationSettings = loadJSON( stationPath + '/settings.json' )
         admins = [x.lower() for x in\
             stationSettings['chatAdmins'] + [ stationSettings['admin'], ]]
-        admin = 'from' in data and data['from'].lower() in admins
+        admin =  isinstance( callsign, str ) and callsign in admins
         chatPath = stationPath + '/chat.json'
+        chatAccess = stationSettings.get('chatAccess')
+        if chatAccess:
+            if chatAccess == 'users' and not isinstance(callsign, str):
+                return web.HTTPUnauthorized(text='You must be logged in to use this chat.')
+            if chatAccess == 'admins' and not admin:
+                return web.HTTPUnauthorized(text='You must be logged in as station admin use this chat.')
     else:
         chatPath = webRoot + '/js/talks.json'
         admin = isinstance( callsign, str ) and callsign in siteAdmins
