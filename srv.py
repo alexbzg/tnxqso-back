@@ -288,7 +288,7 @@ async def loginHandler(request):
         logging.error('Bad Login:')
         logging.error(data)
         logging.error(error)
-        return web.HTTPBadRequest(text = error)
+        return web.HTTPBadRequest(text=error)
 
     userData['token'] = jwt.encode({'callsign': data['login']}, \
             SECRET, algorithm='HS256')
@@ -336,48 +336,48 @@ async def publishHandler(request):
 
 async def userSettingsHandler(request):
     data = await request.json()
-    callsign = decodeToken(data)
-    if not isinstance(callsign, str):
-        return callsign
+    adminCallsign = decodeToken(data)
+    if not isinstance(adminCallsign, str):
+        return adminCallsign
     if 'settings' in data:
-        oldData = await getUserData(callsign)
-        callsign = oldData['settings']['station']['callsign']
-        stationPath = getStationPath(callsign) if callsign else None
+        oldData = await getUserData(adminCallsign)
+        stationCallsign = oldData['settings']['station']['callsign']
+        stationPath = getStationPath(stationCallsign) if stationCallsign else None
         publishPath = webRoot + '/js/publish.json'
         publish = loadJSON(publishPath)
         if not publish:
             publish = {}
-        if callsign != data['settings']['station']['callsign']:
-            newCs = data['settings']['station']['callsign']
-            newPath = getStationPath(newCs) if newCs else None
+        newStationCallsign = data['settings']['station']['callsign']
+        if stationCallsign != newStationCallsign:
+            newPath = getStationPath(newStationCallsign) if newStationCallsign else None
             if stationPath and os.path.exists(stationPath):
                 shutil.rmtree(stationPath)
-            if newCs:
+            if newStationCallsign:
                 if os.path.exists(newPath):
                     return web.HTTPBadRequest(\
                         text = 'Station callsign ' + newCs.upper() + \
                             'is already registered')
                 createStationDir(newPath)
-                if callsign and callsign in publish:
-                    if newCs:
-                        publish[newCs] = publish[callsign]
-                    del publish[callsign]
-                callsign = newCs
+                if stationCallsign and stationCallsign in publish:
+                    if newStationCallsign:
+                        publish[newStationCallsign] = publish[stationCallsign]
+                    del publish[stationCallsign]
+                stationCallsign = newStationCallsign
                 stationPath = newPath
             else:
                 stationPath = None
-        if callsign:
-            if not callsign in publish:
-                publish[callsign] = {'admin': True}
-            publish[callsign]['user'] = data['settings']['publish']
+        if stationCallsign:
+            if not stationCallsign in publish:
+                publish[stationCallsign] = {'admin': True}
+            publish[stationCallsign]['user'] = data['settings']['publish']
         with open(publishPath, 'w') as fPublish:
             json.dump(publish, fPublish, ensure_ascii = False)
         if stationPath:
             if not os.path.exists(stationPath):
-                createStationDir(stationPath, callsign)
-        await saveStationSettings(callsign, callsign, data['settings'])
-    elif 'userColumns'in data:
-        userData = await getUserData(callsign)
+                createStationDir(stationPath)
+        await saveStationSettings(stationCallsign, adminCallsign, data['settings'])
+    elif 'userColumns' in data:
+        userData = await getUserData(adminCallsign)
         settings = userData['settings']
         userColumns = settings['userFields']
         for col in range(0, len(data['userColumns'])):
@@ -386,12 +386,11 @@ async def userSettingsHandler(request):
             else:
                 userColumns[col] = data['userColumns'][col]
         userColumns = userColumns[:len(data['userColumns'])]
-        await saveStationSettings(
-            userData['settings']['station']['callsign'],
-            callsign, settings)
+        await saveStationSettings(userData['settings']['station']['callsign'],
+                adminCallsign, settings)
     else:
-        await db.paramUpdate('users', {'callsign': callsign}, \
-            spliceParams(data, ('email', 'password')))
+        await db.paramUpdate('users', {'callsign': adminCallsign},
+            spliceParams(data, ('email', 'password', 'name', 'chat_callsign')))
     return web.Response(text = 'OK')
 
 async def saveStationSettings(stationCallsign, adminCallsign, settings):
@@ -1165,8 +1164,13 @@ if __name__ == '__main__':
     APP.router.add_post('/aiohttp/log', logHandler)
     APP.router.add_post('/aiohttp/location', locationHandler)
     APP.router.add_post('/aiohttp/publish', publishHandler)
-    APP.router.add_post('/aiohttp/passwordRecoveryRequest', \
+    APP.router.add_post('/aiohttp/passwordRecoveryRequest',
             passwordRecoveryRequestHandler)
+    APP.router.add_post('/aiohttp/confirmEmailRequest',
+            confirmEmailRequestHandler)
+    APP.router.add_post('/aiohttp/confirmEmail',
+            confirmEmailLinkHandler)
+
     APP.router.add_post('/aiohttp/contact', contactHandler)
     APP.router.add_post('/aiohttp/userData', userDataHandler)
     APP.router.add_post('/aiohttp/gallery', galleryHandler)
