@@ -65,6 +65,10 @@ if not SECRET:
     with open(fpSecret, 'wb') as fSecret:
         fSecret.write(SECRET)
 
+BANLIST = loadJSON(webRoot + '/js/banlist.json')
+if not BANLIST:
+    BANLIST = {'callsigns': [], 'emails': []}
+
 defUserSettings = loadJSON(webRoot + '/js/defaultUserSettings.json')
 if not defUserSettings:
     defUserSettings = {}
@@ -149,9 +153,10 @@ async def passwordRecoveryRequestHandler(request):
                 if not userData['email']:
                     error = 'This account has no email address.'
                 else:
-                    token = jwt.encode(
-                        {'callsign': data['login'], 'time': time.time()}, \
-                        SECRET, algorithm='HS256')
+                    token = jwt.encode({
+                        'callsign': data['login'],
+                        'email': userData['email']
+                        }, SECRET, algorithm='HS256')
                     text = 'Click on this link to recover your tnxqso.com ' + \
                              'password: ' + webAddress + \
                              '/#/changePassword?token=' + token + """
@@ -178,8 +183,8 @@ async def confirmEmailRequestHandler(request):
     return web.Response(text = 'OK')
 
 async def confirmEmailLinkHandler(request):
-    token = request.match_info.get('token', None)
-    tokenData = decodeToken(token)
+    logging.debug(request.query['token'])
+    tokenData = decodeToken({'token': bytes(request.query['token'], 'ascii')})
     if not isinstance(tokenData, tuple):
         if isinstance(tokenData, str):
             return web.HTTPBadRequest(text='Invalid token')
@@ -187,7 +192,7 @@ async def confirmEmailLinkHandler(request):
     userParams = {}
     userParams['callsign'], userParams['email'] = tokenData
     await db.paramUpdate('users', userParams, {'email_confirmed': True})
-    return web.Response(text = 'OK')
+    return web.Response(text = 'Your email was verified. Refresh TNXQSO page.')
 
 def confirmEmailMsg(userData):
     del userData['settings']
@@ -195,7 +200,7 @@ def confirmEmailMsg(userData):
     userData['time'] = time.time()
     token = jwt.encode(userData, SECRET, algorithm='HS256')
     text = f"""Click on this link to confirm your email address for your tnxqso.com profile:
-{webAddress}/confirmEmail?token={token}
+{webAddress}/aiohttp/confirmEmail?token={token}
 If you did not request email confirmation or registered tnxqso.com account just ignore this message. 
 The link above will be valid for 1 hour.
 
@@ -416,6 +421,7 @@ def decodeToken(data):
         try:
             payload = jwt.decode(data['token'], SECRET, algorithms=['HS256'])
         except jwt.exceptions.DecodeError:
+            logging.exception('Decode token error')
             return web.HTTPBadRequest(text = 'Login expired')
         if 'callsign' in payload:
             callsign = payload['callsign'].lower()
@@ -423,6 +429,9 @@ def decodeToken(data):
             return web.HTTPBadRequest(text='Token is expired')
         if 'email' in payload:
             email = payload['email']
+    if (callsign and callsign in BANLIST['callsigns']) or (email and email in BANLIST['emails']):
+        return web.HTTPBadRequest(text="Your account was banned. " + 
+                "Ваша учетная запись заблокирована.")
     if callsign and email:
         return (callsign, email)
     if callsign:
@@ -724,6 +733,9 @@ async def newsHandler(request):
 
 async def activeUsersHandler(request):
     data = await request.json()
+    callsign = decodeToken(data)
+    if not isinstance(callsign, str):
+        return callsign
     if 'user' not in data:
         return web.Response(text = 'OK')
     station = data['station'] if 'station' in data else None
@@ -1024,10 +1036,45 @@ async def logHandler(request):
 def replace0(val):
     return val.replace("0", "\u00D8")
 
+async def banUserHandler(request):
+    data = await request.json()
+    callsign = decodeToken(data)
+    if not isinstance(callsign, str):
+        return callsign
+    if callsign not in siteAdmins:
+        return web.HTTPUnauthorized(text='You must be logged in as site admin')
+    userData = await getUserData(data['user'])
+    alt_logins = await db.execute(
+            """select callsign 
+                from users 
+                where email = %(email)s and callsign <> %(callsign)s""", userData)
+    if alt_logins:
+        userData['alts'] = [row['callsign'] for row in alt_logins]
+    if 'query' in data:
+        return web.json_response({
+            'login': userData['callsign'],
+            'email': userData['email'],
+            'alts': userData['alts']
+            })
+
+    if userData['callsign'] not in BANLIST['callsigns']:
+        BANLIST['callsigns'].append(userData['callsign'])
+    if 'alts' in userData:
+        for alt in userData['alts']:
+            if alt not in BANLIST['callsigns']:
+                BANLIST['callsigns'].append(alt)
+    if userData['email'] not in BANLIST['emails']:
+        BANLIST['emails'].append(userData['email'])
+    with open(webRoot + '/js/banlist.json', 'w') as fBl:
+        json.dump(BANLIST, fBl)
+    return web.Response(text='OK')
+
 async def chatHandler(request):
     data = await request.json()
     admin = False
     callsign = decodeToken(data)
+    if not isinstance(callsign, str):
+        return callsign
     chatPath = ''
     station = data['station'] if 'station' in data else None
     chat = []
@@ -1036,7 +1083,7 @@ async def chatHandler(request):
         stationSettings = loadJSON(stationPath + '/settings.json')
         admins = [x.lower() for x in\
             stationSettings['chatAdmins'] + [ stationSettings['admin'], ]]
-        admin =  isinstance(callsign, str) and callsign in admins
+        admin = callsign in admins
         chatPath = stationPath + '/chat.json'
         chatAccess = stationSettings.get('chatAccess')
         if chatAccess:
@@ -1047,12 +1094,9 @@ async def chatHandler(request):
                         text='You must be logged in as station admin to use this chat.')
     else:
         chatPath = webRoot + '/js/talks.json'
-        admin = isinstance(callsign, str) and callsign in siteAdmins
+        admin = callsign in siteAdmins
     if ('clear' in data or 'delete' in data or
             ('text' in data and data['text'][0] == '@')):
-        callsign = decodeToken(data)
-        if not isinstance(callsign, str):
-            return callsign
         if 'clear' in data or 'delete' in data:
             admins = siteAdmins + [stationSettings['admin'],] if station else siteAdmins
             if not callsign in admins:
@@ -1063,6 +1107,7 @@ async def chatHandler(request):
                 return web.HTTPUnauthorized(\
                     text = 'You must be logged in as im user')
     if not 'clear' in data and not 'delete' in data:
+        data['cs'] = callsign
         insertChatMessage(path=chatPath, msgData=data, admin=admin)
     else:
         if 'delete' in data:
@@ -1089,8 +1134,9 @@ def insertChatMessage(path, msgData, admin):
     chat = loadJSON(path)
     if not chat:
         chat = []
-    msg = {'user': msgData['from'], \
-            'text': msgData['text'], \
+    msg = {'user': msgData['from'],
+            'text': msgData['text'],
+            'cs': msgData.get('cs') or msgData['from'],
             'admin': admin, 'ts': time.time()}
     msg['date'], msg['time'] = dtFmt(datetime.utcnow())
     if msg['text'][0] == '@':
@@ -1168,7 +1214,7 @@ if __name__ == '__main__':
             passwordRecoveryRequestHandler)
     APP.router.add_post('/aiohttp/confirmEmailRequest',
             confirmEmailRequestHandler)
-    APP.router.add_post('/aiohttp/confirmEmail',
+    APP.router.add_get('/aiohttp/confirmEmail',
             confirmEmailLinkHandler)
 
     APP.router.add_post('/aiohttp/contact', contactHandler)
@@ -1176,6 +1222,8 @@ if __name__ == '__main__':
     APP.router.add_post('/aiohttp/gallery', galleryHandler)
     APP.router.add_post('/aiohttp/sendSpot', sendSpotHandler)
     APP.router.add_post('/aiohttp/instantMessage', checkInstantMessageHandler)
+    APP.router.add_post('/aiohttp/banUser', banUserHandler)
+
     APP.router.add_get('/aiohttp/adif/{callsign}', exportAdifHandler)
 
     db.verbose = True
