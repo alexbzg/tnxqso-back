@@ -156,15 +156,17 @@ async def passwordRecoveryRequestHandler(request):
                 if not userData['email']:
                     error = 'This account has no email address.'
                 else:
-                    token = jwt.encode({
-                        'callsign': data['login'],
-                        'email': userData['email']
-                        }, SECRET, algorithm='HS256')
-                    text = 'Click on this link to recover your tnxqso.com ' + \
-                             'password: ' + webAddress + \
-                             '/#/changePassword?token=' + token + """
+                    token = jwt.encode({'callsign': data['login'], 'time': time.time()},
+                            SECRET, algorithm='HS256')
+                    text = f"""Click on this link to recover your TNXQSO.com password: 
+{webAddress}/#/changePassword?token={token}
 If you did not request password recovery just ignore this message. 
 The link above will be valid for 1 hour.
+
+Пройдите по этой ссылке для восстановления пароля на TNXQSO.com:
+{webAddress}/#/changePassword?token={token}
+Если вы не запрашивали восстановление пароля, игнорируйте это письмо.
+Время действия ссылки - 1 час.
 
 TNXQSO.com support"""
                     sendEmail(text = text, fr = conf.get('email', 'address'), \
@@ -357,7 +359,9 @@ async def publishHandler(request):
 
 async def userSettingsHandler(request):
     data = await request.json()
+    logging.debug('userSettingsHandler: %s', data)
     adminCallsign = decodeToken(data)
+    logging.debug('token decoded: %s', adminCallsign)
     if not isinstance(adminCallsign, str):
         return adminCallsign
     if 'settings' in data:
@@ -778,6 +782,7 @@ async def activeUsersHandler(request):
             'chat': data.get('chat'),
             'ts': nowTs,
             'station': station,
+            'cs': callsign,
             'typing': data.get('typing')
             }
     with open(auPath, 'w') as fAu:
