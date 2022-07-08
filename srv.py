@@ -156,7 +156,11 @@ async def passwordRecoveryRequestHandler(request):
                 if not userData['email']:
                     error = 'This account has no email address.'
                 else:
-                    token = jwt.encode({'callsign': data['login'], 'time': time.time()},
+                    token = jwt.encode({
+                                'callsign': data['login'],
+                                'time': time.time(),
+                                'aud': ['tnxqso'],
+                                },
                             SECRET, algorithm='HS256')
                     text = f"""Click on this link to recover your TNXQSO.com password: 
 {webAddress}/#/changePassword?token={token}
@@ -202,10 +206,18 @@ async def confirmEmailLinkHandler(request):
     return web.Response(text="Your email was verified. Refresh TNXQSO.com page.\n" + 
         "Ваш email подтвержден, обновите страницу TNXQSO.com")
 
+async def suspiciousHandler(request):
+    return web.json_response(await db.execute("""
+            select callsign, email, chat_callsign 
+            from users
+            where chat_callsign is not null and chat_callsign not in ('', upper(callsign))
+            """))
+
 def confirmEmailMsg(userData):
     del userData['settings']
     del userData['name']
     userData['time'] = time.time()
+    userData['aud'] = ['tnxqso']
     token = jwt.encode(userData, SECRET, algorithm='HS256')
     text = f"""Click on this link to confirm your email address for your TNXQSO.com profile:
 {webAddress}/aiohttp/confirmEmail?token={token}
@@ -260,7 +272,7 @@ def sendEmail(**email):
     msg['Content-Type'] = "text/plain; charset=utf-8"
     msg['Content-Transfer-Encoding'] = "quoted-printable"
 
-    if 'attachments' in email and email['attachments']:
+    if email.get('attachments'):
         for item in email['attachments']:
             part = MIMEApplication(item['data'],
                         Name = item['name'])
@@ -313,8 +325,14 @@ async def loginHandler(request):
         logging.error(error)
         return web.HTTPBadRequest(text=error)
 
-    userData['token'] = jwt.encode({'callsign': data['login']}, \
-            SECRET, algorithm='HS256')
+    userData['token'] = (jwt.encode({
+        'callsign': data['login'],
+        'aud': ['tnxqso', 'rabbitmq'],
+        'scope': [
+            f'rabbitmq.read:tnxqso/{data["login"]}',
+            f'rabbitmq.configure:tnxqso/{data["login"]}',
+            ]
+        }, SECRET, algorithm='HS256'))
     del userData['password']
     if data.get('newUser'):
         confirmEmailMsg(userData)
@@ -443,7 +461,8 @@ def decodeToken(data):
     email = None
     if 'token' in data:
         try:
-            payload = jwt.decode(data['token'], SECRET, algorithms=['HS256'])
+            payload = jwt.decode(data['token'], SECRET,
+                    audience='tnxqso', algorithms=['HS256'])
         except jwt.exceptions.DecodeError:
             logging.exception('Decode token error')
             return web.HTTPBadRequest(text='Login is expired')
@@ -1258,6 +1277,8 @@ if __name__ == '__main__':
             confirmEmailRequestHandler)
     APP.router.add_get('/aiohttp/confirmEmail',
             confirmEmailLinkHandler)
+    APP.router.add_get('/aiohttp/suspicious',
+            suspiciousHandler)
 
     APP.router.add_post('/aiohttp/contact', contactHandler)
     APP.router.add_post('/aiohttp/userData', userDataHandler)
