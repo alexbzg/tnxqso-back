@@ -1,0 +1,5 @@
+[BASIC]
+argument-naming-style=camelCase
+const-naming-style=UPPER_CASE
+function-naming-style=camelCase
+variable-naming-style=camelCase

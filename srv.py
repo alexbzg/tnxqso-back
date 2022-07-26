@@ -29,6 +29,7 @@ from aiohttp import web
 from wand.image import Image
 from wand.color import Color
 from wand.api import library
+import pika
 
 from common import siteConf, loadJSON, appRoot, startLogging, dtFmt, tzOffset
 from tqdb import DBConn, spliceParams
@@ -46,12 +47,20 @@ conf = siteConf()
 webRoot = conf.get('web', 'root_test' if args.test else 'root')
 webAddress = conf.get('web', 'address_test' if args.test else 'address')
 siteAdmins = conf.get('web', 'admins').split(' ')
-imUsers = conf.get('web', 'im_users').split(' ')
 
 startLogging('srv', logging.DEBUG)
 logging.debug("restart")
 
 db = DBConn(conf.items('db_test' if args.test else 'db'))
+
+RABBITMQ_CONNECTION = pika.BlockingConnection(pika.ConnectionParameters(
+    host=conf['rabbitmq']['host'],
+    virtual_host=conf['rabbitmq']['virtual_host'],
+    credentials=pika.PlainCredentials(conf['rabbitmq']['user'],
+        conf['rabbitmq']['password'])))
+RABBITMQ_CHANNEL = RABBITMQ_CONNECTION.channel()
+RABBITMQ_CHANNEL.exchange_delete('pm')
+RABBITMQ_CHANNEL.exchange_declare('pm', 'direct', durable=True)
 
 SECRET = None
 fpSecret = conf.get('files', 'secret')
@@ -68,7 +77,8 @@ if not BANLIST:
     BANLIST = {'callsigns': [], 'emails': []}
 
 CONFIRM_EMAIL_ERRORS = {
-    'Token is expired': 'Link is expired, please repeat your request. Ссылка устарела, пожалуйста повторите запрос.',
+    'Token is expired':
+        'Link is expired, please repeat your request. Ссылка устарела, пожалуйста повторите запрос.',
     'Email address is banned' : 'Email address is banned. Электронная почта заблокирована.'
 }
 
@@ -108,8 +118,6 @@ def emptyQthFields(country=None):
         for idx in range(0, len(QTH_PARAMS['countries'][country]['fields'])):
             tmplt['titles'][idx] = QTH_PARAMS['countries'][country]['fields'][idx]
     return tmplt
-
-IM_QUEUE = {}
 
 async def checkRecaptcha(response):
     try:
@@ -162,7 +170,7 @@ async def passwordRecoveryRequestHandler(request):
                                 'aud': ['tnxqso'],
                                 },
                             SECRET, algorithm='HS256')
-                    text = f"""Click on this link to recover your TNXQSO.com password: 
+                    text = f"""Click on this link to recover your TNXQSO.com password:
 {webAddress}/#/changePassword?token={token}
 If you did not request password recovery just ignore this message. 
 The link above will be valid for 1 hour.
@@ -203,7 +211,7 @@ async def confirmEmailLinkHandler(request):
     userParams = {}
     userParams['callsign'], userParams['email'] = tokenData
     await db.paramUpdate('users', userParams, {'email_confirmed': True})
-    return web.Response(text="Your email was verified. Refresh TNXQSO.com page.\n" + 
+    return web.Response(text="Your email was verified. Refresh TNXQSO.com page.\n" +
         "Ваш email подтвержден, обновите страницу TNXQSO.com")
 
 async def suspiciousHandler(request):
@@ -329,8 +337,11 @@ async def loginHandler(request):
         'callsign': data['login'],
         'aud': ['tnxqso', 'rabbitmq'],
         'scope': [
-            f'rabbitmq.read:tnxqso/{data["login"]}',
-            f'rabbitmq.configure:tnxqso/{data["login"]}',
+            f'rabbitmq.read:{conf["rabbitmq"]["virtual_host"]}/pm/{data["login"]}',
+            f'rabbitmq.configure:{conf["rabbitmq"]["virtual_host"]}/pm/{data["login"]}',
+            f'rabbitmq.read:{conf["rabbitmq"]["virtual_host"]}/stomp-subscription-*',
+            f'rabbitmq.write:{conf["rabbitmq"]["virtual_host"]}/stomp-subscription-*',
+            f'rabbitmq.configure:{conf["rabbitmq"]["virtual_host"]}/stomp-subscription-*'
             ]
         }, SECRET, algorithm='HS256'))
     del userData['password']
@@ -339,6 +350,68 @@ async def loginHandler(request):
     if data['login'] in siteAdmins:
         userData['siteAdmin'] = True
     return web.json_response(userData)
+
+async def privateMessagesPostHandler(request):
+    data = await request.json()
+    callsign = decodeToken(data)
+    if not isinstance(callsign, str):
+        return callsign
+    receiver = await getUserData(data['callsign_to'])
+    if receiver and receiver['pm_enabled']:
+        msg = await db.getObject('private_messages',
+                {'callsign_from': callsign,
+                'callsign_to': data['callsign_to'],
+                'txt': data['txt']}, create=True)
+        del msg['unread']
+        RABBITMQ_CHANNEL.basic_publish(exchange='pm', routing_key=data['callsign_to'],
+                body=json.dumps(msg))
+        return web.Response(text='OK')
+    return web.HTTPBadRequest(text=
+        f'User {data["callsign_to"]} does not exist or is not accepting private messages.'
+        )
+
+async def privateMessagesGetHandler(request):
+    data = await request.json()
+    callsign = decodeToken(data)
+    if not isinstance(callsign, str):
+        return callsign
+    messages = []
+    data = await db.execute(
+        """select id, callsign_from, callsign_to, tstamp, txt
+            from private_messages
+            where callsign = %(cs)s
+            order by id desc""",
+            {'cs': callsign})
+    if data:
+        if isinstance(data, dict):
+            messages.append(data)
+        else:
+            messages = data
+    return web.json_response(messages)
+
+async def privateMessagesDeleteHandler(request):
+    data = await request.json()
+    callsign = decodeToken(data)
+    if not isinstance(callsign, str):
+        return callsign
+    await db.execute(
+        """delete
+            from private_messages
+            where callsign = %(cs)s and id = %(id)s""",
+            {'cs': callsign, 'id': data['id']})
+    return web.json_response(text='OK')
+
+async def privateMessagesReadHandler(request):
+    data = await request.json()
+    callsign = decodeToken(data)
+    if not isinstance(callsign, str):
+        return callsign
+    await db.execute(
+        """update private_messages
+            set unread = false
+            where callsign = %(cs)s and id in %(ids)s""",
+            {'cs': callsign, 'ids': data['ids']})
+    return web.json_response(text='OK')
 
 async def userDataHandler(request):
     data = await request.json()
@@ -401,9 +474,8 @@ async def userSettingsHandler(request):
                 shutil.rmtree(stationPath)
             if newStationCallsign:
                 if os.path.exists(newPath):
-                    return web.HTTPBadRequest(\
-                        text = 'Station callsign ' + newCs.upper() + \
-                            'is already registered')
+                    return web.HTTPBadRequest(text=
+                        f'Station callsign {newStationCallsign.upper()} is already registered')
                 createStationDir(newPath)
                 if stationCallsign and stationCallsign in publish:
                     if newStationCallsign:
@@ -437,7 +509,7 @@ async def userSettingsHandler(request):
                 adminCallsign, settings)
     else:
         await db.paramUpdate('users', {'callsign': adminCallsign},
-            spliceParams(data, ('email', 'password', 'name', 'chat_callsign')))
+            spliceParams(data, ('email', 'password', 'name', 'chat_callsign', 'pm_enabled')))
     return web.Response(text = 'OK')
 
 async def saveStationSettings(stationCallsign, adminCallsign, settings):
@@ -1100,8 +1172,8 @@ async def banUserHandler(request):
         return web.HTTPUnauthorized(text='You must be logged in as site admin')
     userData = await getUserData(data['user'])
     altLogins = await db.execute(
-            """select callsign 
-                from users 
+            """select callsign
+                from users
                 where email = %(email)s and callsign <> %(callsign)s""", userData)
     if altLogins:
         if isinstance(altLogins, dict):
@@ -1156,21 +1228,14 @@ async def chatHandler(request):
     else:
         chatPath = webRoot + '/js/talks.json'
         admin = callsign in siteAdmins
-    if ('clear' in data or 'delete' in data or
-            ('text' in data and data['text'][0] == '@')):
-        if 'clear' in data or 'delete' in data:
-            admins = siteAdmins + [stationSettings['admin'],] if station else siteAdmins
-            if not callsign in admins:
-                return web.HTTPUnauthorized(\
-                    text = 'You must be logged in as station or site admin')
-        else:
-            if not callsign in imUsers:
-                return web.HTTPUnauthorized(\
-                    text = 'You must be logged in as im user')
     if not 'clear' in data and not 'delete' in data:
         data['cs'] = callsign
         insertChatMessage(path=chatPath, msgData=data, admin=admin)
     else:
+        admins = siteAdmins + [stationSettings['admin'],] if station else siteAdmins
+        if not callsign in admins:
+            return web.HTTPUnauthorized(\
+                text='You must be logged in as station or site admin')
         if 'delete' in data:
             chat = loadJSON(chatPath)
             if not chat:
@@ -1179,16 +1244,6 @@ async def chatHandler(request):
         with open(chatPath, 'w') as fChat:
             json.dump(chat, fChat, ensure_ascii = False)
     return web.Response(text = 'OK')
-
-async def checkInstantMessageHandler(request):
-    data = await request.json()
-    rsp = None
-    if data['user'] in IM_QUEUE:
-        rsp = IM_QUEUE[data['user']]
-        del IM_QUEUE[data['user']]
-        logging.debug('------- IM_QUEUE -------')
-        logging.debug(IM_QUEUE)
-    return web.json_response(rsp)
 
 def insertChatMessage(path, msgData, admin):
     CHAT_MAX_LENGTH = int(conf['chat']['max_length'])
@@ -1200,35 +1255,19 @@ def insertChatMessage(path, msgData, admin):
             'cs': msgData.get('cs') or msgData['from'],
             'admin': admin, 'ts': time.time()}
     msg['date'], msg['time'] = dtFmt(datetime.utcnow())
-    if msg['text'][0] == '@':
-        _to, txt = msg['text'][1:].split(' ', maxsplit=1)
-        txt = txt.strip()
-        if not txt and _to in IM_QUEUE:
-            del IM_QUEUE[_to]
-        else:
-            IM_QUEUE[_to] = {
-                    'user': msg['user'],
-                    'text': txt,
-                    'ts': msg['ts'],
-                    'date': msg['date'],
-                    'time': msg['time']
-                   }
-            logging.debug('------- IM_QUEUE -------')
-            logging.debug(IM_QUEUE)
-    else:
-        if 'name' in msgData:
-            msg['name'] = msgData['name']
-        chat.insert(0, msg)
-        chatTrunc = []
-        chatAdm = []
-        for msg in chat:
-            if msg['text'].startswith('***') and msg['admin']:
-                chatAdm.append(msg)
-            elif len(chatTrunc) < CHAT_MAX_LENGTH:
-                chatTrunc.append(msg)
-        chat = chatAdm + chatTrunc
-        with open(path, 'w') as fChat:
-            json.dump(chat, fChat, ensure_ascii = False)
+    if 'name' in msgData:
+        msg['name'] = msgData['name']
+    chat.insert(0, msg)
+    chatTrunc = []
+    chatAdm = []
+    for msg in chat:
+        if msg['text'].startswith('***') and msg['admin']:
+            chatAdm.append(msg)
+        elif len(chatTrunc) < CHAT_MAX_LENGTH:
+            chatTrunc.append(msg)
+    chat = chatAdm + chatTrunc
+    with open(path, 'w') as fChat:
+        json.dump(chat, fChat, ensure_ascii = False)
 
 async def sendSpotHandler(request):
     global lastSpotSent
@@ -1284,7 +1323,10 @@ if __name__ == '__main__':
     APP.router.add_post('/aiohttp/userData', userDataHandler)
     APP.router.add_post('/aiohttp/gallery', galleryHandler)
     APP.router.add_post('/aiohttp/sendSpot', sendSpotHandler)
-    APP.router.add_post('/aiohttp/instantMessage', checkInstantMessageHandler)
+    APP.router.add_post('/aiohttp/privateMessages/post', privateMessagesPostHandler)
+    APP.router.add_post('/aiohttp/privateMessages/get', privateMessagesGetHandler)
+    APP.router.add_post('/aiohttp/privateMessages/delete', privateMessagesDeleteHandler)
+    APP.router.add_post('/aiohttp/privateMessages/read', privateMessagesReadHandler)
     APP.router.add_post('/aiohttp/banUser', banUserHandler)
 
     APP.router.add_get('/aiohttp/adif/{callsign}', exportAdifHandler)
