@@ -359,16 +359,16 @@ async def privateMessagesPostHandler(request):
     receiver = await getUserData(data['callsign_to'])
     if receiver and receiver['pm_enabled']:
         msg = await db.getObject('private_messages',
-                {'callsign_from': callsign,
+                {'callsign_from': data['callsign_from'],   
                 'callsign_to': data['callsign_to'],
                 'txt': data['txt']}, create=True)
         del msg['unread']
+        sender = await getUserData(data['callsign_from'])
+        msg['chat_callsign_from'], msg['name_from'] = sender['chat_callsign'], sender['name']
         RABBITMQ_CHANNEL.basic_publish(exchange='pm', routing_key=data['callsign_to'],
                 body=json.dumps(msg))
         return web.Response(text='OK')
-    return web.HTTPBadRequest(text=
-        f'User {data["callsign_to"]} does not exist or is not accepting private messages.'
-        )
+    return web.HTTPBadRequest(text='The recipient does not exist or is not accepting private messages.')
 
 async def privateMessagesGetHandler(request):
     data = await request.json()
@@ -377,9 +377,10 @@ async def privateMessagesGetHandler(request):
         return callsign
     messages = []
     data = await db.execute(
-        """select id, callsign_from, callsign_to, tstamp, txt
-            from private_messages
-            where callsign = %(cs)s
+        """select id, callsign_from, callsign_to, tstamp, txt,
+                chat_callsign as chat_callsign_from, name as name_from
+            from private_messages join users on callsign_from = users.callsign
+            where callsign_to = %(cs)s
             order by id desc""",
             {'cs': callsign})
     if data:
@@ -869,11 +870,13 @@ async def activeUsersHandler(request):
     if not auData:
         auData = {}
     auData = {key: val for key, val in auData.items() if nowTs - val['ts'] < 120}
-    auData[data['user']] = {
+    auData[callsign] = {
             'chat': data.get('chat'),
             'ts': nowTs,
             'station': station,
-            'cs': callsign,
+            'callsign': callsign,
+            'chat_callsign': data.get('chat_callsign'),
+            'name': data.get('name'),
             'typing': data.get('typing')
             }
     with open(auPath, 'w') as fAu:
