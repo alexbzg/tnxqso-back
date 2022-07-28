@@ -6,7 +6,7 @@ import logging
 import logging.handlers
 import os
 import base64
-import json
+import simplejson as json
 import time
 import math
 import smtplib
@@ -31,7 +31,7 @@ from wand.color import Color
 from wand.api import library
 import pika
 
-from common import siteConf, loadJSON, appRoot, startLogging, dtFmt, tzOffset
+from common import siteConf, loadJSON, appRoot, startLogging, dtFmt, tzOffset, jsonEncodeExtra
 from tqdb import DBConn, spliceParams
 import clusterProtocol
 
@@ -59,8 +59,8 @@ RABBITMQ_CONNECTION = pika.BlockingConnection(pika.ConnectionParameters(
     credentials=pika.PlainCredentials(conf['rabbitmq']['user'],
         conf['rabbitmq']['password'])))
 RABBITMQ_CHANNEL = RABBITMQ_CONNECTION.channel()
-RABBITMQ_CHANNEL.exchange_delete('pm')
-RABBITMQ_CHANNEL.exchange_declare('pm', 'direct', durable=True)
+RABBITMQ_CHANNEL.exchange_declare(exchange='pm', exchange_type='direct', durable=True)
+RABBITMQ_CHANNEL.confirm_delivery()
 
 SECRET = None
 fpSecret = conf.get('files', 'secret')
@@ -366,7 +366,9 @@ async def privateMessagesPostHandler(request):
         sender = await getUserData(data['callsign_from'])
         msg['chat_callsign_from'], msg['name_from'] = sender['chat_callsign'], sender['name']
         RABBITMQ_CHANNEL.basic_publish(exchange='pm', routing_key=data['callsign_to'],
-                body=json.dumps(msg))
+                body=json.dumps(msg, default=jsonEncodeExtra))
+        RABBITMQ_CHANNEL.basic_publish(exchange='pm', routing_key='test',
+                body=json.dumps(msg, default=jsonEncodeExtra))
         return web.Response(text='OK')
     return web.HTTPBadRequest(text='The recipient does not exist or is not accepting private messages.')
 
@@ -856,7 +858,7 @@ async def activeUsersHandler(request):
     callsign = decodeToken(data)
     if not isinstance(callsign, str):
         return callsign
-    if 'user' not in data:
+    if not data.get('chat_callsign'):
         return web.Response(text = 'OK')
     station = data['station'] if 'station' in data else None
     if station:

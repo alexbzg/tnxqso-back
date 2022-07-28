@@ -20,14 +20,11 @@ def readConf( file ):
     conf.read( appRoot + '/' + file )
     return conf
 
-
 def jsonEncodeExtra( obj ):
     if isinstance( obj, decimal.Decimal ):
         return float( obj )
-    elif isinstance(obj, datetime):
-        return obj.isoformat()
-    elif isinstance(obj, date):
-        return obj.isoformat()
+    elif isinstance(obj, (date, datetime)):
+        return dtFmt(obj)
     raise TypeError( repr( obj ) + " is not JSON serializable" )
 
 def loadJSON( pathJS ):
