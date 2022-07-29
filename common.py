@@ -2,10 +2,13 @@
 #coding=utf-8
 
 
-import configparser, decimal, json, logging, logging.handlers, os
+import configparser, decimal, logging, logging.handlers, os
 from os import path
 from datetime import datetime, date
+from functools import partial
+
 from passlib.apache import HtpasswdFile
+import simplejson as json
 
 appRoot = path.dirname( path.abspath( __file__ ) ) 
 
@@ -20,12 +23,15 @@ def readConf( file ):
     conf.read( appRoot + '/' + file )
     return conf
 
+
 def jsonEncodeExtra( obj ):
     if isinstance( obj, decimal.Decimal ):
         return float( obj )
     elif isinstance(obj, (date, datetime)):
         return dtFmt(obj)
     raise TypeError( repr( obj ) + " is not JSON serializable" )
+
+json_dumps = partial(json.dumps, default=jsonEncodeExtra)
 
 def loadJSON( pathJS ):
     if not path.isfile( pathJS ):

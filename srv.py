@@ -1,12 +1,10 @@
 #!/usr/bin/python3
 #coding=utf-8
 
-import argparse
 import logging
 import logging.handlers
 import os
 import base64
-import simplejson as json
 import time
 import math
 import smtplib
@@ -20,7 +18,9 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
 from ctypes import c_void_p, c_size_t
+from functools import partial
 
+import simplejson as json
 import requests
 import ffmpeg
 import aiohttp
@@ -31,7 +31,7 @@ from wand.color import Color
 from wand.api import library
 import pika
 
-from common import siteConf, loadJSON, appRoot, startLogging, dtFmt, tzOffset, jsonEncodeExtra
+from common import siteConf, loadJSON, appRoot, startLogging, dtFmt, tzOffset, json_dumps
 from tqdb import DBConn, spliceParams
 import clusterProtocol
 
@@ -39,28 +39,15 @@ from countries import get_country
 
 library.MagickSetCompressionQuality.argtypes = [c_void_p, c_size_t]
 
-parser = argparse.ArgumentParser(description="tnxqso backend aiohttp server")
-parser.add_argument('--test', action = "store_true")
-args = parser.parse_args()
-
 conf = siteConf()
-webRoot = conf.get('web', 'root_test' if args.test else 'root')
-webAddress = conf.get('web', 'address_test' if args.test else 'address')
+webRoot = conf.get('web', 'root')
+webAddress = conf.get('web', 'address')
 siteAdmins = conf.get('web', 'admins').split(' ')
 
 startLogging('srv', logging.DEBUG)
 logging.debug("restart")
 
-db = DBConn(conf.items('db_test' if args.test else 'db'))
-
-RABBITMQ_CONNECTION = pika.BlockingConnection(pika.ConnectionParameters(
-    host=conf['rabbitmq']['host'],
-    virtual_host=conf['rabbitmq']['virtual_host'],
-    credentials=pika.PlainCredentials(conf['rabbitmq']['user'],
-        conf['rabbitmq']['password'])))
-RABBITMQ_CHANNEL = RABBITMQ_CONNECTION.channel()
-RABBITMQ_CHANNEL.exchange_declare(exchange='pm', exchange_type='direct', durable=True)
-RABBITMQ_CHANNEL.confirm_delivery()
+db = DBConn(conf.items('db'))
 
 SECRET = None
 fpSecret = conf.get('files', 'secret')
@@ -130,6 +117,8 @@ async def checkRecaptcha(response):
     except Exception:
         logging.exception('Recaptcha error')
         return False
+
+web_json_response = partial(web.json_response, dumps=json_dumps)
 
 async def getUserData(callsign):
     return await db.getObject('users', {'callsign': callsign}, False, True)
@@ -362,15 +351,24 @@ async def privateMessagesPostHandler(request):
                 {'callsign_from': data['callsign_from'],   
                 'callsign_to': data['callsign_to'],
                 'txt': data['txt']}, create=True)
-        del msg['unread']
         sender = await getUserData(data['callsign_from'])
         msg['chat_callsign_from'], msg['name_from'] = sender['chat_callsign'], sender['name']
-        RABBITMQ_CHANNEL.basic_publish(exchange='pm', routing_key=data['callsign_to'],
-                body=json.dumps(msg, default=jsonEncodeExtra))
-        RABBITMQ_CHANNEL.basic_publish(exchange='pm', routing_key='test',
-                body=json.dumps(msg, default=jsonEncodeExtra))
+
+        rabbitmq_connection = pika.BlockingConnection(pika.ConnectionParameters(
+            host=conf['rabbitmq']['host'],
+            virtual_host=conf['rabbitmq']['virtual_host'],
+            credentials=pika.PlainCredentials(conf['rabbitmq']['user'],
+                conf['rabbitmq']['password'])))
+        rabbitmq_channel = rabbitmq_connection.channel()
+        rabbitmq_channel.exchange_declare(exchange='pm', exchange_type='direct', durable=True)
+        rabbitmq_channel.confirm_delivery()
+        rabbitmq_channel.basic_publish(exchange='pm', routing_key=data['callsign_to'],
+                body=json_dumps(msg))
+        rabbitmq_connection.close()
+
         return web.Response(text='OK')
-    return web.HTTPBadRequest(text='The recipient does not exist or is not accepting private messages.')
+    return web.HTTPBadRequest(
+            text='The recipient does not exist or is not accepting private messages.')
 
 async def privateMessagesGetHandler(request):
     data = await request.json()
@@ -379,7 +377,7 @@ async def privateMessagesGetHandler(request):
         return callsign
     messages = []
     data = await db.execute(
-        """select id, callsign_from, callsign_to, tstamp, txt,
+        """select id, callsign_from, callsign_to, tstamp, txt, unread,
                 chat_callsign as chat_callsign_from, name as name_from
             from private_messages join users on callsign_from = users.callsign
             where callsign_to = %(cs)s
@@ -390,7 +388,7 @@ async def privateMessagesGetHandler(request):
             messages.append(data)
         else:
             messages = data
-    return web.json_response(messages)
+    return web_json_response(messages)
 
 async def privateMessagesDeleteHandler(request):
     data = await request.json()
@@ -400,7 +398,7 @@ async def privateMessagesDeleteHandler(request):
     await db.execute(
         """delete
             from private_messages
-            where callsign = %(cs)s and id = %(id)s""",
+            where callsign_to = %(cs)s and id = %(id)s""",
             {'cs': callsign, 'id': data['id']})
     return web.json_response(text='OK')
 
@@ -412,8 +410,8 @@ async def privateMessagesReadHandler(request):
     await db.execute(
         """update private_messages
             set unread = false
-            where callsign = %(cs)s and id in %(ids)s""",
-            {'cs': callsign, 'ids': data['ids']})
+            where callsign_to = %(cs)s and id in %(ids)s""",
+            {'cs': callsign, 'ids': tuple(data['ids'])})
     return web.json_response(text='OK')
 
 async def userDataHandler(request):
@@ -877,6 +875,7 @@ async def activeUsersHandler(request):
             'ts': nowTs,
             'station': station,
             'callsign': callsign,
+            'pm_enabled': data.get('pm_enabled'),
             'chat_callsign': data.get('chat_callsign'),
             'name': data.get('name'),
             'typing': data.get('typing')
@@ -1343,5 +1342,4 @@ if __name__ == '__main__':
 
     APP.on_startup.append(onStartup)
 
-    args = parser.parse_args()
     web.run_app(APP, path = conf.get('sockets', 'srv'))
