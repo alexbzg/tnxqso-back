@@ -395,11 +395,18 @@ async def privateMessagesDeleteHandler(request):
     callsign = decodeToken(data)
     if not isinstance(callsign, str):
         return callsign
-    await db.execute(
-        """delete
-            from private_messages
-            where callsign_to = %(cs)s and id = %(id)s""",
-            {'cs': callsign, 'id': data['id']})
+    if data.get('all'):
+        await db.execute(
+            """delete
+                from private_messages
+                where callsign_to = %(cs)s""",
+                {'cs': callsign})
+    else:
+        await db.execute(
+            """delete
+                from private_messages
+                where callsign_to = %(cs)s and id = %(id)s""",
+                {'cs': callsign, 'id': data['id']})
     return web.json_response(text='OK')
 
 async def privateMessagesReadHandler(request):
