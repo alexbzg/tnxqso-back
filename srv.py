@@ -543,7 +543,7 @@ def decodeToken(data):
         try:
             payload = jwt.decode(data['token'], SECRET,
                     audience='tnxqso', algorithms=['HS256'])
-        except jwt.exceptions.DecodeError:
+        except (jwt.exceptions.DecodeError, jwt.exceptions.MissingRequiredClaimError):
             logging.exception('Decode token error')
             return web.HTTPBadRequest(text='Login is expired')
         if 'callsign' in payload:
