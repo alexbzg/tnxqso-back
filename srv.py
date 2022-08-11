@@ -1044,13 +1044,15 @@ async def trackHandler(request):
 async def logFromDB(callsign):
     log = []
     data = await db.execute(
-        "select id, qso from log where callsign = %(cs)s order by id desc",
+        f"""select id, qso from log 
+            where callsign = %(cs)s order by id desc 
+            limit {conf['web'].getint('log_page_length')}""",
             {'cs': callsign})
     if data:
         if isinstance(data, dict):
-            log.append(data)
+            log.append(data['qso'])
         else:
-            log = [ row['qso'] for row in data ]
+            log = [row['qso'] for row in data]
     return log
 
 async def dbInsertQso(callsign, qso):
@@ -1149,6 +1151,7 @@ async def logHandler(request):
 
         log = sorted(log, key=lambda qso: qso['qso_ts'] if 'qso_ts' in qso else qso['ts']/10,\
                 reverse=True)
+        log = log[:conf['web'].getint('log_page_length')]
         with open(logPath, 'w') as fLog:
             json.dump(log, fLog)
 
@@ -1170,6 +1173,24 @@ async def logHandler(request):
     with open(logPath, 'w') as fLog:
         json.dump(log, fLog)
     return web.Response(text = 'OK')
+
+async def logSearchHandler(request):
+    reqData = await request.json()
+    if not reqData.get('station'):
+        return web.HTTPBadRequest(text='Invalid search params')
+    result = []
+    csFilter = "and qso->>'cs' = %(callsign)s" if reqData.get('callsign') else ''
+    dbData = await db.execute(
+        f"""select id, qso from log 
+            where callsign = %(station)s {csFilter}
+            order by id desc""",
+            reqData)
+    if dbData:
+        if isinstance(dbData, dict):
+            result.append(dbData['qso'])
+        else:
+            result = [row['qso'] for row in dbData]
+    return web.json_response(result)
 
 def replace0(val):
     return val.replace("0", "\u00D8")
@@ -1319,6 +1340,7 @@ if __name__ == '__main__':
     APP.router.add_post('/aiohttp/chat', chatHandler)
     APP.router.add_post('/aiohttp/activeUsers', activeUsersHandler)
     APP.router.add_post('/aiohttp/log', logHandler)
+    APP.router.add_post('/aiohttp/logSearch', logSearchHandler)
     APP.router.add_post('/aiohttp/location', locationHandler)
     APP.router.add_post('/aiohttp/publish', publishHandler)
     APP.router.add_post('/aiohttp/passwordRecoveryRequest',
