@@ -1220,18 +1220,68 @@ async def banUserHandler(request):
             'email': userData['email'],
             'alts': userData['alts']
             })
-
-    if userData['callsign'] not in BANLIST['callsigns']:
-        BANLIST['callsigns'].append(userData['callsign'])
-    if 'alts' in userData:
-        for alt in userData['alts']:
-            if alt not in BANLIST['callsigns']:
-                BANLIST['callsigns'].append(alt)
-    if userData['email'] not in BANLIST['emails']:
-        BANLIST['emails'].append(userData['email'])
+    if data.get('unban'):
+        if userData['callsign'] in BANLIST['callsigns']:
+            BANLIST['callsigns'].remove(userData['callsign'])
+        if 'alts' in userData:
+            for alt in userData['alts']:
+                if alt in BANLIST['callsigns']:
+                    BANLIST['callsigns'].remove(alt)
+        if userData['email'] in BANLIST['emails']:
+            BANLIST['emails'].remove(userData['email'])
+    else:
+        if userData['callsign'] not in BANLIST['callsigns']:
+            BANLIST['callsigns'].append(userData['callsign'])
+        if 'alts' in userData:
+            for alt in userData['alts']:
+                if alt not in BANLIST['callsigns']:
+                    BANLIST['callsigns'].append(alt)
+        if userData['email'] not in BANLIST['emails']:
+            BANLIST['emails'].append(userData['email'])
     with open(webRoot + '/js/banlist.json', 'w') as fBl:
         json.dump(BANLIST, fBl)
     return web.Response(text='OK')
+
+async def usersListHandler(request):
+    data = await request.json()
+    callsign = decodeToken(data)
+    if not isinstance(callsign, str):
+        return callsign
+    if not callsign in siteAdmins:
+        return web.HTTPUnauthorized(\
+            text='You must be logged in as site admin')
+    where_clause = ''
+    params = {}
+    if data.get('filter') == 'new':
+        where_clause = 'where not verified'
+    elif data.get('filter') == 'no_chatcall':
+        where_clause = "where chat_callsign is null or chat_callsign = ''"
+    elif data.get('filter') == 'banned':
+        where_clause = "where email in %(banned)s"
+        params['banned'] = tuple(BANLIST['emails'])
+    ulist = await db.execute(f"""
+        select callsign, email, email_confirmed, verified, chat_callsign, name
+            from users {where_clause} 
+            order by callsign""", params)
+    if not ulist:
+        ulist = []
+    if isinstance(ulist, dict):
+        ulist = [ulist,]
+    for user in ulist:
+        user['banned'] = data.get('filter') == 'banned' or user['email'] in BANLIST['emails']
+    return web.json_response(ulist)
+
+async def userEditHandler(request):
+    data = await request.json()
+    callsign = decodeToken(data)
+    if not isinstance(callsign, str):
+        return callsign
+    if not callsign in siteAdmins:
+        return web.HTTPUnauthorized(\
+            text='You must be logged in as site admin')
+    await db.paramUpdate('users', {'callsign': data['callsign']},
+            spliceParams(data, ['verified', 'email_confirmed']))
+    return web.Response(text = 'OK')
 
 async def chatHandler(request):
     data = await request.json()
@@ -1361,6 +1411,8 @@ if __name__ == '__main__':
     APP.router.add_post('/aiohttp/privateMessages/delete', privateMessagesDeleteHandler)
     APP.router.add_post('/aiohttp/privateMessages/read', privateMessagesReadHandler)
     APP.router.add_post('/aiohttp/banUser', banUserHandler)
+    APP.router.add_post('/aiohttp/users', usersListHandler)
+    APP.router.add_post('/aiohttp/editUser', userEditHandler)
 
     APP.router.add_get('/aiohttp/adif/{callsign}', exportAdifHandler)
 
