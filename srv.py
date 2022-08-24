@@ -1250,15 +1250,14 @@ async def usersListHandler(request):
     if not callsign in siteAdmins:
         return web.HTTPUnauthorized(\
             text='You must be logged in as site admin')
-    where_clause = ''
-    params = {}
+    where_clause = 'where email not in %(banned)s'
+    params = {'banned': tuple(BANLIST['emails'])}
     if data.get('filter') == 'new':
-        where_clause = 'where not verified'
+        where_clause += ' and not verified'
     elif data.get('filter') == 'no_chatcall':
-        where_clause = "where chat_callsign is null or chat_callsign = ''"
+        where_clause += " and (chat_callsign is null or chat_callsign = '')"
     elif data.get('filter') == 'banned':
         where_clause = "where email in %(banned)s"
-        params['banned'] = tuple(BANLIST['emails'])
     ulist = await db.execute(f"""
         select callsign, email, email_confirmed, verified, chat_callsign, name
             from users {where_clause} 
