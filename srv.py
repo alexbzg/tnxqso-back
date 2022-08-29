@@ -515,6 +515,13 @@ async def userSettingsHandler(request):
         userColumns = userColumns[:len(data['userColumns'])]
         await saveStationSettings(userData['settings']['station']['callsign'],
                 adminCallsign, settings)
+    elif 'manualStats' in data:
+        userData = await getUserData(adminCallsign)
+        stationCallsign = userData['settings']['station']['callsign']
+        stationPath = getStationPath(stationCallsign) if stationCallsign else None
+        if stationPath:
+            with open(stationPath + '/manualStats.json', 'w') as fManualStats:
+                json.dump(data['manualStats'], fManualStats, ensure_ascii = False)
     else:
         await db.paramUpdate('users', {'callsign': adminCallsign},
             spliceParams(data, ('email', 'password', 'name', 'chat_callsign', 'pm_enabled')))
