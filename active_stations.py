@@ -35,7 +35,7 @@ for callsign, publishSettings in publish.items():
                 if status.get('online') and stationSettings['status']['get'] != 'manual':
                     status['online'] = now - status['ts'] < ONLINE_INT
                 else:
-                    status['online'] = status.get('online')
+                    status['online'] = status.get('online', False)
                 if status.get('freq') and status['freq'].get('value'):
                     status['freq'] = status['freq']['value'] if now - status['freq']['ts'] < FREQ_INT else None
                 else: 

@@ -523,6 +523,8 @@ async def userSettingsHandler(request):
             with open(stationPath + '/manualStats.json', 'w') as fManualStats:
                 json.dump(data['manualStats'], fManualStats, ensure_ascii = False)
     else:
+        if data.get('chat_callsign') and len(data['chat_callsign']) < 3:
+            return web.HTTPBadRequest(text='Chat callsign should have 3 or more characters.')
         await db.paramUpdate('users', {'callsign': adminCallsign},
             spliceParams(data, ('email', 'password', 'name', 'chat_callsign', 'pm_enabled')))
     return web.Response(text = 'OK')
