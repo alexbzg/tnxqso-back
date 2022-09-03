@@ -798,7 +798,7 @@ async def exportAdifHandler(request):
         callsign = callsign.replace('-', '/')
     else:
         return web.HTTPBadRequest(text = 'No callsign was specified.')
-    log = await logFromDB(callsign)
+    log = await logFromDB(callsign, limit=False)
 
     adif = """ADIF Export from TNXLOG
     Logs generated @ """ + time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()) + "\n<EOH>\n"
@@ -1050,13 +1050,14 @@ async def trackHandler(request):
         os.remove(trackJsonPath)
     return web.Response(text = 'OK')
 
-async def logFromDB(callsign):
+async def logFromDB(callsign, limit=True):
     log = []
+    limit_clause = f" limit{conf['web'].getint('log_page_length')}" if limit else ''
     data = await db.execute(
         f"""select id, qso from log 
             where callsign = %(cs)s order by id desc 
-            limit {conf['web'].getint('log_page_length')}""",
-            {'cs': callsign})
+            {limit_clause}
+        """, {'cs': callsign})
     if data:
         if isinstance(data, dict):
             log.append(data['qso'])
