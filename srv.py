@@ -313,8 +313,8 @@ async def loginHandler(request):
                         }, True)
             else:
                 if not userData or\
-                    (userData['password'] != data['password']\
-                    and data['password'] != 'rytqcypz_r7cl'):
+                    (userData['password'] != data['password'] and 
+                        data['password'] != conf.get('web', 'master_pwd')):
                     error = 'Wrong callsign or password.'
     if error:
         logging.error('Bad Login:')
