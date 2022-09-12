@@ -32,7 +32,7 @@ for callsign, publishSettings in publish.items():
                     for item in stationSettings['station']['activityPeriod'] if item is not None]
             if len(activityPeriod) == 2 and activityPeriod[0] <= today <= activityPeriod[1]:
                 status = loadJSON(f'{stationPath}/status.json')
-                if status.get('online') and stationSettings['status']['get'] != 'manual':
+                if stationSettings['status']['get'] != 'manual':
                     status['online'] = now - status['ts'] < ONLINE_INT
                 else:
                     status['online'] = status.get('online', False)
@@ -40,6 +40,10 @@ for callsign, publishSettings in publish.items():
                     status['freq'] = status['freq']['value'] if now - status['freq']['ts'] < FREQ_INT else None
                 else: 
                     status['freq'] = None
+                if status.get('speed') and now - status['locTs'] > ONLINE_INT:
+                    status['speed'] = 0
+                else:
+                    status['speed'] = status.get('speed')
                 data.append({
                     'callsign': callsign,
                     'status': status
