@@ -919,6 +919,39 @@ async def readMultipart(request):
                 data[field.name] = None
     return data
 
+async def soundRecordHandler(request):
+    data = None
+    if 'multipart/form-data;' in request.headers[aiohttp.hdrs.CONTENT_TYPE]:
+        data = await readMultipart(request)
+    else:
+        data = await request.json()
+    callsign = decodeToken(data)
+    if not (await getUserData(callsign))['email_confirmed']:
+        return web.HTTPUnauthorized(text='Email is not confirmed')
+    if not isinstance(callsign, str):
+        return callsign
+    stationPath = await getStationPathByAdminCS(callsign)
+    soundRecordsPath = stationPath + '/sound'
+    if not os.path.isdir(soundRecordsPath):
+        os.mkdir(soundRecordsPath)
+    file = data['file']['contents']
+    fileName = data['file']['name']
+    filePath = soundRecordsPath + '/' + fileName
+    with open(filePath, 'wb') as fSound:
+        fSound.write(file)
+    soundRecordsDataPath = stationPath + '/sound.json'
+    soundRecordsData = loadJSON(soundRecordsDataPath)
+    if not soundRecordsData:
+        soundRecordsData = []
+    soundRecordsData.append({
+        'file': fileName, 
+        'period': json.loads(data['period'])
+        })
+    with open(soundRecordsDataPath, 'w') as fSRData:
+        json.dump(soundRecordsData, fSRData, ensure_ascii = False)
+    return web.Response(text='OK')
+
+
 async def galleryHandler(request):
     data = None
     if 'multipart/form-data;' in request.headers[aiohttp.hdrs.CONTENT_TYPE]:
@@ -1414,6 +1447,7 @@ if __name__ == '__main__':
     APP.router.add_post('/aiohttp/contact', contactHandler)
     APP.router.add_post('/aiohttp/userData', userDataHandler)
     APP.router.add_post('/aiohttp/gallery', galleryHandler)
+    APP.router.add_post('/aiohttp/soundRecord', soundRecordHandler)
     APP.router.add_post('/aiohttp/sendSpot', sendSpotHandler)
     APP.router.add_post('/aiohttp/privateMessages/post', privateMessagesPostHandler)
     APP.router.add_post('/aiohttp/privateMessages/get', privateMessagesGetHandler)
