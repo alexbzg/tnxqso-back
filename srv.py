@@ -943,10 +943,7 @@ async def soundRecordHandler(request):
     soundRecordsData = loadJSON(soundRecordsDataPath)
     if not soundRecordsData:
         soundRecordsData = []
-    soundRecordsData.append({
-        'file': fileName, 
-        'period': json.loads(data['period'])
-        })
+    soundRecordsData.append(fileName)
     with open(soundRecordsDataPath, 'w') as fSRData:
         json.dump(soundRecordsData, fSRData, ensure_ascii = False)
     return web.Response(text='OK')
@@ -1162,7 +1159,7 @@ async def logHandler(request):
                         sameFl = True
                         for key in qso:
                             if key not in ('ts', 'rda', 'wff', 'comments',
-                                'serverTs', 'qso_ts', 'qth', 'no') and (
+                                'serverTs', 'qso_ts', 'qth', 'no', 'sound') and (
                                         key not in logQso or qso[key] != logQso[key]):
                                 sameFl = False
                                 break
