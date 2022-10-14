@@ -33,7 +33,7 @@ for callsign, publishSettings in publish.items():
             if len(activityPeriod) == 2 and activityPeriod[0] <= today <= activityPeriod[1]:
                 status = loadJSON(f'{stationPath}/status.json')
                 if stationSettings['status']['get'] != 'manual':
-                    status['online'] = now - status['ts'] < ONLINE_INT
+                    status['online'] = status.get('ts') and (now - status['ts'] < ONLINE_INT)
                 else:
                     status['online'] = status.get('online', False)
                 if status.get('freq') and status['freq'].get('value'):
