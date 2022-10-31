@@ -19,6 +19,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
 from ctypes import c_void_p, c_size_t
 from functools import partial
+from pathlib import Path
 
 import simplejson as json
 import requests
@@ -1209,6 +1210,12 @@ async def logHandler(request):
         await db.execute(
             "delete from log where callsign = %(callsign)s",
             {'callsign': callsign})
+        #clear sound recordings
+        for file in Path(stationPath + "/sound").glob("*"):
+            if file.is_file():
+                file.unlink()
+        with open(stationPath + '/sound.json', 'w') as fSound:
+            json.dump([], fSound)
 
     with open(logPath, 'w') as fLog:
         json.dump(log, fLog)
