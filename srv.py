@@ -555,17 +555,17 @@ def decodeToken(data):
                     audience='tnxqso', algorithms=['HS256'])
         except (jwt.exceptions.DecodeError, jwt.exceptions.MissingRequiredClaimError):
             logging.exception('Decode token error')
-            return web.HTTPBadRequest(text='Login is expired')
+            return web.HTTPUnauthorized(text='Invalid token')
         if 'callsign' in payload:
             callsign = payload['callsign'].lower()
         if 'time' in payload and time.time() - payload['time'] > 60 * 60:
-            return web.HTTPBadRequest(text='Token is expired')
+            return web.HTTPUnauthorized(text='Expitred token')
         if 'email' in payload:
             email = payload['email']
     if callsign and callsign in BANLIST['callsigns']:
-        return web.HTTPBadRequest(text="Account is banned")
+        return web.HTTPUnauthorized(text="Account is banned")
     if email and email in BANLIST['emails']:
-        return web.HTTPBadRequest(text="Email address is banned")
+        return web.HTTPUnauthorized(text="Email address is banned")
     if callsign and email:
         return (callsign, email)
     if callsign:
@@ -722,7 +722,7 @@ async def locationHandler(request):
             'text': '<b><i>' + newData['freq'] + '</b></i>'},
             admin=True)
     country = stationSettings['qthCountry'] if 'qthCountry' in stationSettings else None
-    if 'location' in newData and newData['location']:
+    if newData.get('location'):
         location = newData['location']
 
         country = get_country(location)
@@ -734,7 +734,7 @@ async def locationHandler(request):
         if 'location' in data and data['location']:
             data['prev'] = {'location': data['location'][:], \
                     'ts': data['locTs']}
-        data['locTs'] = data['ts']
+        data['locTs'], data['locDate'], data['locTime'] = data['ts'], data['date'], data['time']
         data['location'] = newData['location']
         if 'prev' in data:
             lat = [data['location'][1], data['prev']['location'][1]]
@@ -793,6 +793,8 @@ BANDS_WL = {'1.8': '160M', '3.5': '80M', '7': '40M', \
         '10': '30M', '14': '20M', '20': '14M', '18': '17M', '21': '15M', \
         '24': '12M', '28': '10M', '50': '6M', '144': '2M'}
 
+ADIF_QTH_FIELDS = ('MY_CNTY', 'MY_CITY', 'NOTES')
+
 async def exportAdifHandler(request):
     callsign = request.match_info.get('callsign', None)
     if callsign:
@@ -829,7 +831,7 @@ async def exportAdifHandler(request):
             logging.error(qso)
 
         for fieldNo, val in enumerate(qso['qth']):
-            adif += adifField(f'QTH_FIELD_{fieldNo + 1}', val)
+            adif += adifField(ADIF_QTH_FIELDS[fieldNo], val)
         adif += "<EOR>\n"
 
     return web.Response(
@@ -1148,7 +1150,8 @@ async def logHandler(request):
                     log.append(qso)
                 dbUpdate = await db.execute("""
                     update log set qso = %(qso)s
-                    where callsign = %(callsign)s and (qso->>'ts')::float = %(ts)s""",
+                    where callsign = %(callsign)s and (qso->>'ts')::float = %(ts)s
+                    returning (qso->>'ts')::float""",
                     {'callsign': callsign, 'ts': qso['ts'], 'qso': json.dumps(qso)})
                 if not dbUpdate:
                     await dbInsertQso(callsign, qso)
