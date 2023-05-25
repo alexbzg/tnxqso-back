@@ -1099,10 +1099,18 @@ async def logFromDB(callsign, limit=True):
     return log
 
 async def dbInsertQso(callsign, qso):
-    await db.execute("""
+    insertSuccess = await db.execute("""
         insert into log (callsign, qso) 
         values (%(callsign)s, %(qso)s)""",
         {'callsign': callsign, 'qso': json.dumps(qso)})
+    if not insertSuccess:
+        qsoInDB = await db.execute("""
+            select qso from log
+            where callsign = %(callsign)s and (qso->>'cs') = %(cs)s and 
+                (qso->>'qso_ts') = %(qso_ts) and (qso->>'band') = %(band)""",
+            {'callsign': callsign, 'qso_ts': qso['qso_ts'], 'cs': qso['cs'], 'band': qso['band']})
+        if qsoInDB:
+            return qsoInDB.get('ts')
 
 async def logHandler(request):
     data = await request.json()
@@ -1154,7 +1162,9 @@ async def logHandler(request):
                     returning (qso->>'ts')::float""",
                     {'callsign': callsign, 'ts': qso['ts'], 'qso': json.dumps(qso)})
                 if not dbUpdate:
-                    await dbInsertQso(callsign, qso)
+                    prevTs = await dbInsertQso(callsign, qso)
+                    if prevTs:
+                        qso['ts'] = prevTs
 
             else:
                 newQso = True
@@ -1186,7 +1196,9 @@ async def logHandler(request):
                     while [x for x in log if x['ts'] == qso['ts']]:
                         qso['ts'] += 0.00000001
                     log.insert(0, qso)
-                    await dbInsertQso(callsign, qso)
+                    prevTs = await dbInsertQso(callsign, qso)
+                    if prevTs:
+                        qso['ts'] = prevTs
 
             return {'ts': qso['ts']}
 
