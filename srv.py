@@ -971,68 +971,76 @@ async def galleryHandler(request):
     if not galleryData:
         galleryData = []
     if 'file' in data:
-        if not os.path.isdir(galleryPath):
-            os.mkdir(galleryPath)
-        file = data['file']['contents']
-        fileNameBase = uuid.uuid4().hex
-        fileExt = data['file']['name'].rpartition('.')[2]
-        fileName = fileNameBase + '.' + fileExt
-        fileType = 'image' if 'image'\
-            in data['file']['type'] else 'video'
-        filePath = galleryPath + '/' + fileName
-        with open(filePath, 'wb') as fImg:
-            fImg.write(file)
-        tnSrc = filePath
-        if fileType == 'video':
+        postId = uuid.uuid4().hex
+        if data['file']:
+            if not os.path.isdir(galleryPath):
+                os.mkdir(galleryPath)
+            file = data['file']['contents']
+            fileNameBase = postId
+            fileExt = data['file']['name'].rpartition('.')[2]
+            fileName = fileNameBase + '.' + fileExt
+            fileType = 'image' if 'image'\
+                in data['file']['type'] else 'video'
+            filePath = galleryPath + '/' + fileName
+            with open(filePath, 'wb') as fImg:
+                fImg.write(file)
+            tnSrc = filePath
+            if fileType == 'video':
 
-            tnSrc = galleryPath + '/' + fileNameBase + '.jpeg'
-            (
-                ffmpeg
-                    .input(filePath)
-                    .output(tnSrc, vframes=1)
-                    .run()
-            )
+                tnSrc = galleryPath + '/' + fileNameBase + '.jpeg'
+                (
+                    ffmpeg
+                        .input(filePath)
+                        .output(tnSrc, vframes=1)
+                        .run()
+                )
 
-        with Image(filename=tnSrc) as img:
-            with Image(width=img.width, height=img.height,
-                    background=Color("#EEEEEE")) as bgImg:
+            with Image(filename=tnSrc) as img:
+                with Image(width=img.width, height=img.height,
+                        background=Color("#EEEEEE")) as bgImg:
 
-                bgImg.composite(img, 0, 0)
+                    bgImg.composite(img, 0, 0)
 
-                exif = {}
-                exif.update((key[5:], val) for key, val in img.metadata.items() if
-                        key.startswith('exif:'))
-                if 'Orientation' in exif:
-                    if exif['Orientation'] == '3':
-                        bgImg.rotate(180)
-                    elif exif['Orientation'] == '6':
-                        bgImg.rotate(90)
-                    elif exif['Orientation'] == '8':
-                        bgImg.rotate(270)
+                    exif = {}
+                    exif.update((key[5:], val) for key, val in img.metadata.items() if
+                            key.startswith('exif:'))
+                    if 'Orientation' in exif:
+                        if exif['Orientation'] == '3':
+                            bgImg.rotate(180)
+                        elif exif['Orientation'] == '6':
+                            bgImg.rotate(90)
+                        elif exif['Orientation'] == '8':
+                            bgImg.rotate(270)
 
-                size = img.width if img.width < img.height else img.height
-                bgImg.crop(width=size, height=size, gravity='north')
-                bgImg.resize(200, 200)
-                bgImg.format = 'jpeg'
-                bgImg.save(filename=f'{galleryPath}/{fileNameBase}_thumb.jpeg')
-                if fileType == 'image':
-                    maxHeight, maxWidth = (int(siteGalleryParams['max_height']),
-                            int(siteGalleryParams['max_width']))
-                    if img.width > maxWidth or img.height > maxHeight:
-                        coeff = min(maxWidth/img.width, maxHeight/img.height)
-                        img.resize(width=int(coeff*img.width), height=int(coeff*img.height))
-                        img.compression_quality = int(siteGalleryParams['quality'])
-                        img.save(filename=filePath)
-        if fileType == 'video':
-            os.unlink(tnSrc)
-        galleryData.insert(0, {
-            'file': f'gallery/{fileName}',
-            'thumb': f'gallery/{fileNameBase}_thumb.jpeg',
-            'caption': data['caption'],
-            'type': fileType,
-            'ts': time.time(),
-            'datetime': datetime.utcnow().strftime('%d %b %Y %H:%M').lower(),
-            'id': fileNameBase})
+                    size = img.width if img.width < img.height else img.height
+                    bgImg.crop(width=size, height=size, gravity='north')
+                    bgImg.resize(200, 200)
+                    bgImg.format = 'jpeg'
+                    bgImg.save(filename=f'{galleryPath}/{fileNameBase}_thumb.jpeg')
+                    if fileType == 'image':
+                        maxHeight, maxWidth = (int(siteGalleryParams['max_height']),
+                                int(siteGalleryParams['max_width']))
+                        if img.width > maxWidth or img.height > maxHeight:
+                            coeff = min(maxWidth/img.width, maxHeight/img.height)
+                            img.resize(width=int(coeff*img.width), height=int(coeff*img.height))
+                            img.compression_quality = int(siteGalleryParams['quality'])
+                            img.save(filename=filePath)
+            if fileType == 'video':
+                os.unlink(tnSrc)
+            galleryData.insert(0, {
+                'file': f'gallery/{fileName}',
+                'thumb': f'gallery/{fileNameBase}_thumb.jpeg',
+                'caption': data['caption'],
+                'type': fileType,
+                'ts': time.time(),
+                'datetime': datetime.utcnow().strftime('%d %b %Y %H:%M').lower(),
+                'id': postId})
+        else:
+             galleryData.insert(0, {
+                'caption': data['caption'],
+                'ts': time.time(),
+                'datetime': datetime.utcnow().strftime('%d %b %Y %H:%M').lower(),
+                'id': postId})
         maxCount = int(siteGalleryParams['max_count'])
         if len(galleryData) > maxCount:
             galleryData = sorted(galleryData, key=lambda item: item['ts'], reverse=True)[:maxCount]
