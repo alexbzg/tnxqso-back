@@ -832,7 +832,7 @@ async def exportAdifHandler(request):
 
         for fieldNo, val in enumerate(qso['qth']):
             adif += adifField(ADIF_QTH_FIELDS[fieldNo], val)
-        adif += "<EOR>\n"
+        adif += "<EOR>\r\n"
 
     return web.Response(
             headers={
