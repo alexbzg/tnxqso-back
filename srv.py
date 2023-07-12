@@ -994,6 +994,18 @@ async def galleryHandler(request):
                         .output(tnSrc, vframes=1)
                         .run()
                 )
+                videoProps = ffmpeg.probe(filePath)
+                if videoProps['streams'][0]['height'] > 720:
+                    tmpFilePath = f"{galleryPath}/{fileNameBase}_tmp.{fileExt}"
+                    os.rename(filePath, tmpFilePath)
+                    (
+                        ffmpeg
+                            .input(tmpFilePath)
+                            .filter('scale', -1, 720)
+                            .output(filePath)
+                            .run()
+                    )
+                    os.unlink(tmpFilePath)
 
             with Image(filename=tnSrc) as img:
                 with Image(width=img.width, height=img.height,
@@ -1050,10 +1062,12 @@ async def galleryHandler(request):
         if items:
             item = items[0]
             galleryData = [x for x in galleryData if x != item]
-            deleteGalleryItem(stationPath, item)
+            if 'file' in item:
+                deleteGalleryItem(stationPath, item)
     if 'clear' in data:
         for item in galleryData:
-            deleteGalleryItem(stationPath, item)
+            if 'file' in item:
+                deleteGalleryItem(stationPath, item)
         galleryData = []
     with open(galleryDataPath, 'w') as fGallery:
         json.dump(galleryData, fGallery, ensure_ascii = False)
