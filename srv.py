@@ -580,7 +580,7 @@ def cosd(deg):
 
 def wfsQuery(wfsType, location, strict=False):
     params = WFS_PARAMS[wfsType]
-    url = ('https://r1cf.ru/geoserver/cite/wfs?SERVICE=WFS&REQUEST=GetFeature&TypeName=' +
+    url = ('https://r1cf.ru:8088/geoserver/cite/wfs?SERVICE=WFS&REQUEST=GetFeature&TypeName=' +
         '{feature}&VERSION=1.1.0&CQL_FILTER={predi}%28the_geom,POINT%28{lat}%20{lng}%29' +
         '{addParams}%29')
     urlParams = {
@@ -1000,9 +1000,15 @@ async def galleryHandler(request):
                     os.rename(filePath, tmpFilePath)
                     (
                         ffmpeg
-                            .input(tmpFilePath)
-                            .filter('scale', -1, 720)
-                            .output(filePath)
+                            .output(
+                                ffmpeg
+                                    .input(tmpFilePath)
+                                    .video
+                                    .filter('scale', -2, 720),
+                                 ffmpeg
+                                    .input(tmpFilePath)
+                                    .audio,
+                                filePath)
                             .run()
                     )
                     os.unlink(tmpFilePath)
