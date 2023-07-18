@@ -633,6 +633,19 @@ async def getQthData(location, country=None):
         data['fields']['values'][1] = RAFA_LOCS[data['loc']]\
             if data['loc'] in RAFA_LOCS else None
 
+    elif country == 'KZ':
+
+        kda = '-----'
+        allKda = wfsQuery('kda', location)
+        strictKda = wfsQuery('kda', location, strict=True)
+        if allKda:
+            if len(allRda) > 1:
+                allKda = [strictKda] + [x for x in allKda if x != strictKda or x == '-----']
+                kda = ' '.join(allKda)
+            else:
+                kda = allKda[0]
+        data['fields']['values'][0] = kda
+
     elif country == 'IT':
         data['fields']['values'][0] = wfsQuery('waip', location, strict=True)
 
