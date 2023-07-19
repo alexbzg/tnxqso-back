@@ -95,7 +95,8 @@ lastSpotSent = None
 WFS_PARAMS = {\
         "rda": {"feature": "RDA_2020", "tag": "RDA"},\
         "waip": {"feature": "WAIP2", "tag": "WAIPIT"},\
-        "wab": {"feature": "WAB", "tag": "NAME"}
+        "wab": {"feature": "WAB", "tag": "NAME"},
+        "kda": {"feature": "KDA_layer", "tag": "KDA"}
 }
 
 QTH_PARAMS = loadJSON(webRoot + '/js/qthParams.json')
@@ -611,7 +612,7 @@ async def getQthData(location, country=None):
 
     if not country:
         country = get_country(location)
-    if country not in ('RU', 'IT', 'GB'):
+    if country not in QTH_PARAMS['countries']:
         country = 'RU'
 
     data = {'fields': emptyQthFields(country)}
@@ -639,7 +640,7 @@ async def getQthData(location, country=None):
         allKda = wfsQuery('kda', location)
         strictKda = wfsQuery('kda', location, strict=True)
         if allKda:
-            if len(allRda) > 1:
+            if len(allKda) > 1:
                 allKda = [strictKda] + [x for x in allKda if x != strictKda or x == '-----']
                 kda = ' '.join(allKda)
             else:

@@ -39,6 +39,12 @@ rsp = requests.post('https://' + pfx + 'tnxqso.com/aiohttp/location',\
         data=json.dumps({'location': [51.7674, -1.2635]}))
 print(rsp.text)
 
+print("Test KZ")
+rsp = requests.post('https://' + pfx + 'tnxqso.com/aiohttp/location',\
+        data=json.dumps({'location': [43.25, 76.9]}))
+print(rsp.text)
+
+
 print("Login tests")
 rsp = requests.post('https://' + pfx + 'tnxqso.com/aiohttp/login',\
         data=json.dumps({'login': 'ADM111N', 'password': '11111111'}))
