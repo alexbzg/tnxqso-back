@@ -809,6 +809,172 @@ BANDS_WL = {'1.8': '160M', '3.5': '80M', '7': '40M', \
 
 ADIF_QTH_FIELDS = ('MY_CNTY', 'MY_CITY', 'NOTES')
 
+async def getBlogEntriesHandler(request):
+    callsign = request.match_info.get('callsign', None)
+    if not callsign:
+        return web.HTTPBadRequest(text = 'No callsign was specified.')
+    data = await db.execute("""
+            select id, "file", file_type, file_thumb, txt, 
+                to_char(timestamp_created, 'Dy, DD Mon YYYY HH24:MI:SS GMT') as last_modified,
+                to_char(timestamp_created, 'DD Mon YYYY HH24:MI') as post_datetime
+            from blog_entries
+            where "user" = %(callsign)s
+            order by id desc
+            """,
+            params={'callsign': callsign},
+            container='list')
+    if not data:
+        return web.HTTPNotFound(text='Blog entries not found')
+    
+    return web.json_response(data, headers={'last-modified': data[0]['last_modified']})
+
+async def deleteBlogEntryHandler(request):
+    entryId = int(request.match_info.get('entry_id', None))
+    if not entryId:
+        return web.HTTPBadRequest(text = 'No valid post id was specified.')
+    data = await request.json()
+    callsign = decodeToken(data)
+    if not (await getUserData(callsign))['email_confirmed']:
+        return web.HTTPUnauthorized(text='Email is not confirmed')
+    if not isinstance(callsign, str):
+        return callsign
+    entryInDB = await db.execute("""
+        select id, "file", file_thumb
+        from blog_entries
+        where id = %(entryId)s and "user" = %(callsign)s""",
+        {'entryId': entryId, 'callsign': callsign})
+    if not entryInDB:
+        return web.HTTPNotFound(text='Blog entry not found')
+    stationPath = await getStationPathByAdminCS(callsign)
+    await deleteBlogEntry(entryInDB, stationPath)
+    return web.Response(text='OK')
+
+async def createBlogEntryHandler(request):
+    data = None
+    if 'multipart/form-data;' in request.headers[aiohttp.hdrs.CONTENT_TYPE]:
+        data = await readMultipart(request)
+    else:
+        data = await request.json()
+    callsign = decodeToken(data)
+    if not (await getUserData(callsign))['email_confirmed']:
+        return web.HTTPUnauthorized(text='Email is not confirmed')
+    if not isinstance(callsign, str):
+        return callsign
+    stationPath = await getStationPathByAdminCS(callsign)
+    galleryPath = stationPath + '/gallery'
+    file = fileType = fileThumb = mediaWidth = None
+    if 'file' in data:
+        postId = uuid.uuid4().hex
+        if data['file']:
+            if not os.path.isdir(galleryPath):
+                os.mkdir(galleryPath)
+            file = data['file']['contents']
+            fileNameBase = postId
+            fileExt = data['file']['name'].rpartition('.')[2]
+            fileName = fileNameBase + '.' + fileExt
+            fileType = 'image' if 'image'\
+                in data['file']['type'] else 'video'
+            filePath = galleryPath + '/' + fileName
+            with open(filePath, 'wb') as fImg:
+                fImg.write(file)
+            tnSrc = filePath
+            if fileType == 'video':
+
+                tnSrc = galleryPath + '/' + fileNameBase + '.jpeg'
+                (
+                    ffmpeg
+                        .input(filePath)
+                        .output(tnSrc, vframes=1)
+                        .run()
+                )
+                videoProps = ffmpeg.probe(filePath)
+                if videoProps['streams'][0]['height'] > 720:
+                    tmpFilePath = f"{galleryPath}/{fileNameBase}_tmp.{fileExt}"
+                    os.rename(filePath, tmpFilePath)
+                    (
+                        ffmpeg
+                            .output(
+                                ffmpeg
+                                    .input(tmpFilePath)
+                                    .video
+                                    .filter('scale', -2, 720),
+                                 ffmpeg
+                                    .input(tmpFilePath)
+                                    .audio,
+                                filePath)
+                            .run()
+                    )
+                    os.unlink(tmpFilePath)
+
+            with Image(filename=tnSrc) as img:
+                with Image(width=img.width, height=img.height,
+                        background=Color("#EEEEEE")) as bgImg:
+
+                    bgImg.composite(img, 0, 0)
+
+                    exif = {}
+                    exif.update((key[5:], val) for key, val in img.metadata.items() if
+                            key.startswith('exif:'))
+                    if 'Orientation' in exif:
+                        if exif['Orientation'] == '3':
+                            bgImg.rotate(180)
+                        elif exif['Orientation'] == '6':
+                            bgImg.rotate(90)
+                        elif exif['Orientation'] == '8':
+                            bgImg.rotate(270)
+
+                    size = img.width if img.width < img.height else img.height
+                    bgImg.crop(width=size, height=size, gravity='north')
+                    bgImg.resize(200, 200)
+                    bgImg.format = 'jpeg'
+                    bgImg.save(filename=f'{galleryPath}/{fileNameBase}_thumb.jpeg')
+                    if fileType == 'image':
+                        maxHeight, maxWidth = (int(conf['gallery']['max_height']),
+                                int(conf['gallery']['max_width']))
+                        if img.width > maxWidth or img.height > maxHeight:
+                            coeff = min(maxWidth/img.width, maxHeight/img.height)
+                            img.resize(width=int(coeff*img.width), height=int(coeff*img.height))
+                            img.compression_quality = int(conf['gallery']['quality'])
+                            img.save(filename=filePath)
+            if fileType == 'video':
+                os.unlink(tnSrc)
+            
+            file = f'gallery/{fileName}'
+            fileThumb = f'gallery/{fileNameBase}_thumb.jpeg'
+
+        await db.execute("""
+            insert into blog_entries
+                ("user", "file", file_type, file_thumb, txt)
+            values
+                (%(callsign)s, %(file)s, %(fileType)s, %(fileThumb)s, %(text)s)
+            """,
+            params={'callsign': callsign, 'file': file, 'fileType': fileType, 
+                'fileThumb': fileThumb, 'text': data['caption']})
+ 
+        if file:
+            maxCount = int(conf['gallery']['max_count'])
+            excess = await db.execute("""
+                select id, "file", file_thumb
+                from blog_entries
+                where "user" = %(callsign)s and "file" is not null
+                order by id desc
+                offset %(maxCount)s""",
+                params={'callsign': callsign, 'maxCount': maxCount},
+                container='list')
+            if excess:
+                for entry in excess:
+                    await deleteBlogEntry(entry, stationPath)
+
+        return web.Response(text='OK')
+
+async def deleteBlogEntry(entry, stationPath):
+    if entry['file']:
+        os.unlink(f"{stationPath}/{entry['file']}")
+        os.unlink(f"{stationPath}/{entry['file_thumb']}")
+    await db.execute("""
+        delete from blog_entries
+        where id = %(id)s""", entry)
+
 async def exportAdifHandler(request):
     callsign = request.match_info.get('callsign', None)
     if callsign:
@@ -965,136 +1131,6 @@ async def soundRecordHandler(request):
         json.dump(soundRecordsData, fSRData, ensure_ascii = False)
     return web.Response(text='OK')
 
-
-async def galleryHandler(request):
-    data = None
-    if 'multipart/form-data;' in request.headers[aiohttp.hdrs.CONTENT_TYPE]:
-        data = await readMultipart(request)
-    else:
-        data = await request.json()
-    callsign = decodeToken(data)
-    if not (await getUserData(callsign))['email_confirmed']:
-        return web.HTTPUnauthorized(text='Email is not confirmed')
-    if not isinstance(callsign, str):
-        return callsign
-    stationPath = await getStationPathByAdminCS(callsign)
-    galleryPath = stationPath + '/gallery'
-    galleryDataPath = stationPath + '/gallery.json'
-    galleryData = loadJSON(galleryDataPath)
-    siteGalleryParams = conf['gallery']
-    if not galleryData:
-        galleryData = []
-    if 'file' in data:
-        postId = uuid.uuid4().hex
-        if data['file']:
-            if not os.path.isdir(galleryPath):
-                os.mkdir(galleryPath)
-            file = data['file']['contents']
-            fileNameBase = postId
-            fileExt = data['file']['name'].rpartition('.')[2]
-            fileName = fileNameBase + '.' + fileExt
-            fileType = 'image' if 'image'\
-                in data['file']['type'] else 'video'
-            filePath = galleryPath + '/' + fileName
-            with open(filePath, 'wb') as fImg:
-                fImg.write(file)
-            tnSrc = filePath
-            if fileType == 'video':
-
-                tnSrc = galleryPath + '/' + fileNameBase + '.jpeg'
-                (
-                    ffmpeg
-                        .input(filePath)
-                        .output(tnSrc, vframes=1)
-                        .run()
-                )
-                videoProps = ffmpeg.probe(filePath)
-                if videoProps['streams'][0]['height'] > 720:
-                    tmpFilePath = f"{galleryPath}/{fileNameBase}_tmp.{fileExt}"
-                    os.rename(filePath, tmpFilePath)
-                    (
-                        ffmpeg
-                            .output(
-                                ffmpeg
-                                    .input(tmpFilePath)
-                                    .video
-                                    .filter('scale', -2, 720),
-                                 ffmpeg
-                                    .input(tmpFilePath)
-                                    .audio,
-                                filePath)
-                            .run()
-                    )
-                    os.unlink(tmpFilePath)
-
-            with Image(filename=tnSrc) as img:
-                with Image(width=img.width, height=img.height,
-                        background=Color("#EEEEEE")) as bgImg:
-
-                    bgImg.composite(img, 0, 0)
-
-                    exif = {}
-                    exif.update((key[5:], val) for key, val in img.metadata.items() if
-                            key.startswith('exif:'))
-                    if 'Orientation' in exif:
-                        if exif['Orientation'] == '3':
-                            bgImg.rotate(180)
-                        elif exif['Orientation'] == '6':
-                            bgImg.rotate(90)
-                        elif exif['Orientation'] == '8':
-                            bgImg.rotate(270)
-
-                    size = img.width if img.width < img.height else img.height
-                    bgImg.crop(width=size, height=size, gravity='north')
-                    bgImg.resize(200, 200)
-                    bgImg.format = 'jpeg'
-                    bgImg.save(filename=f'{galleryPath}/{fileNameBase}_thumb.jpeg')
-                    if fileType == 'image':
-                        maxHeight, maxWidth = (int(siteGalleryParams['max_height']),
-                                int(siteGalleryParams['max_width']))
-                        if img.width > maxWidth or img.height > maxHeight:
-                            coeff = min(maxWidth/img.width, maxHeight/img.height)
-                            img.resize(width=int(coeff*img.width), height=int(coeff*img.height))
-                            img.compression_quality = int(siteGalleryParams['quality'])
-                            img.save(filename=filePath)
-            if fileType == 'video':
-                os.unlink(tnSrc)
-            galleryData.insert(0, {
-                'file': f'gallery/{fileName}',
-                'thumb': f'gallery/{fileNameBase}_thumb.jpeg',
-                'caption': data['caption'],
-                'type': fileType,
-                'ts': time.time(),
-                'datetime': datetime.utcnow().strftime('%d %b %Y %H:%M').lower(),
-                'id': postId})
-        else:
-             galleryData.insert(0, {
-                'caption': data['caption'],
-                'ts': time.time(),
-                'datetime': datetime.utcnow().strftime('%d %b %Y %H:%M').lower(),
-                'id': postId})
-        maxCount = int(siteGalleryParams['max_count'])
-        if len(galleryData) > maxCount:
-            galleryData = sorted(galleryData, key=lambda item: item['ts'], reverse=True)[:maxCount]
-
-    if 'delete' in data:
-        items = [x for x in galleryData if x['id'] == data['delete']]
-        if items:
-            item = items[0]
-            galleryData = [x for x in galleryData if x != item]
-            if 'file' in item:
-                deleteGalleryItem(stationPath, item)
-    if 'clear' in data:
-        for item in galleryData:
-            if 'file' in item:
-                deleteGalleryItem(stationPath, item)
-        galleryData = []
-    with open(galleryDataPath, 'w') as fGallery:
-        json.dump(galleryData, fGallery, ensure_ascii = False)
-    return web.Response(text='OK')
-
-def deleteGalleryItem(stationPath, item):
-    os.unlink(stationPath + '/' + item['file'])
 
 async def trackHandler(request):
     data = await request.json()
@@ -1507,7 +1543,6 @@ if __name__ == '__main__':
 
     APP.router.add_post('/aiohttp/contact', contactHandler)
     APP.router.add_post('/aiohttp/userData', userDataHandler)
-    APP.router.add_post('/aiohttp/gallery', galleryHandler)
     APP.router.add_post('/aiohttp/soundRecord', soundRecordHandler)
     APP.router.add_post('/aiohttp/sendSpot', sendSpotHandler)
     APP.router.add_post('/aiohttp/privateMessages/post', privateMessagesPostHandler)
@@ -1519,6 +1554,11 @@ if __name__ == '__main__':
     APP.router.add_post('/aiohttp/editUser', userEditHandler)
 
     APP.router.add_get('/aiohttp/adif/{callsign}', exportAdifHandler)
+
+    APP.router.add_get('/aiohttp/blog/{callsign}', getBlogEntriesHandler)
+    APP.router.add_post('/aiohttp/blog/', createBlogEntryHandler)
+    APP.router.add_delete('/aiohttp/blog/{entry_id}', deleteBlogEntryHandler)
+
 
     db.verbose = True
 

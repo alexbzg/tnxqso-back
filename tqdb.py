@@ -5,16 +5,16 @@ import aiopg, logging, traceback, json, asyncio, psycopg2
 
 from common import siteConf
 
-async def toDict( cur, keys = None ):
+async def toDict(cur, container=None, keyColumn='id'):
     if cur and cur.rowcount:
         colNames = [ col.name for col in cur.description ]
-        if cur.rowcount == 1 and not keys:
+        if cur.rowcount == 1 and not container:
             data = await cur.fetchone()
             return dict( zip( colNames, data ) )
         else:
             data = await cur.fetchall()
-            if ( 'id' in colNames ) and keys:
-                idIdx = colNames.index( 'id' )
+            if keyColumn and (keyColumn in colNames) and container == 'dict':
+                idIdx = colNames.index(keyColumn)
                 return { row[ idIdx ]: dict( zip( colNames, row ) ) \
                         for row in data }
             else:
@@ -83,7 +83,7 @@ class DBConn:
                     True )
         return r
 
-    async def execute( self, sql, params = None ):
+    async def execute( self, sql, params=None, container=None, keyColumn=None):
         res = False
         with (await self.pool.cursor()) as cur:
             try:
@@ -91,7 +91,7 @@ class DBConn:
                     logging.debug( sql )
                     logging.debug( params )
                 await cur.execute( sql, params )                                
-                res = ( await toDict( cur ) ) if cur.description != None else True
+                res = ( await toDict(cur, container, keyColumn) ) if cur.description != None else True
             except psycopg2.Error as e:
                 logging.exception( "Error executing: " + sql + "\n" )
                 stack = traceback.extract_stack()
