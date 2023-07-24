@@ -849,6 +849,39 @@ async def deleteBlogEntryHandler(request):
     await deleteBlogEntry(entryInDB, stationPath)
     return web.Response(text='OK')
 
+async def createBlogCommentHandler(request):
+    entryId = int(request.match_info.get('entry_id', None))
+    if not entryId:
+        return web.HTTPBadRequest(text = 'No valid post id was specified.')
+    data = await request.json()
+    callsign = decodeToken(data)
+    if not (await getUserData(callsign))['email_confirmed']:
+        return web.HTTPUnauthorized(text='Email is not confirmed')
+    if not isinstance(callsign, str):
+        return callsign
+    await db.execute("""
+        insert into blog_comments ("user", entry_id, txt)
+        values (%(callsign)s, %(entryId)s, %(txt)s)""",
+        {"callsign": callsign, "entry_id": entry_id, "txt": data["text"]})
+    return web.Response(text="OK")
+
+async def getBlogCommentsHandler(request):
+    entryId = int(request.match_info.get('entry_id', None))
+    if not entryId:
+        return web.HTTPBadRequest(text = 'No valid post id was specified.')
+    data = await db.execute("""
+        select id, "user", txt,
+            to_char(timestamp_created, 'DD Mon YYYY HH24:MI') as comment_datetime,
+            name, chat_callsign, pm_enabled
+        from blog_comments join users on blog_comments.user = users.callsign
+        where entry_id = %(entryId)s
+        order by id""",
+        {"entryId": entryId}, 
+        container="list")
+    if not data:
+        return web.HTTPNotFound(text='Blog comments not found')
+    return web.json_response(data)
+
 async def createBlogEntryHandler(request):
     data = None
     if 'multipart/form-data;' in request.headers[aiohttp.hdrs.CONTENT_TYPE]:
@@ -1559,7 +1592,9 @@ if __name__ == '__main__':
     APP.router.add_post('/aiohttp/blog/', createBlogEntryHandler)
     APP.router.add_delete('/aiohttp/blog/{entry_id}', deleteBlogEntryHandler)
 
-
+    APP.router.add_get('/aiohttp/blog/{entry_id}/comments', getBlogCommentsHandler)
+    APP.router.add_post('/aiohttp/blog/{entry_id}/comments', createBlogCommentHandler)
+ 
     db.verbose = True
 
     async def onStartup(_):
