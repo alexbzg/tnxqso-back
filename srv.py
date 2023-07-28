@@ -841,13 +841,40 @@ async def deleteBlogEntryHandler(request):
     entryInDB = await db.execute("""
         select id, "file", file_thumb
         from blog_entries
-        where id = %(entryId)s and "user" = %(callsign)s""",
-        {'entryId': entryId, 'callsign': callsign})
+        where id = %(entryId)s and (%(callsign)s is null or "user" = %(callsign)s)""",
+        {'entryId': entryId, 'callsign': callsign if callsign not in siteAdmins else None})
     if not entryInDB:
         return web.HTTPNotFound(text='Blog entry not found')
     stationPath = await getStationPathByAdminCS(callsign)
     await deleteBlogEntry(entryInDB, stationPath)
     return web.Response(text='OK')
+
+async def deleteBlogCommentHandler(request):
+    commentId = int(request.match_info.get('comment_id', None))
+    if not commentId:
+        return web.HTTPBadRequest(text = 'No valid comment id was specified.')
+    data = await request.json()
+    callsign = decodeToken(data)
+    if not (await getUserData(callsign))['email_confirmed']:
+        return web.HTTPUnauthorized(text='Email is not confirmed')
+    if not isinstance(callsign, str):
+        return callsign
+    commentInDB = await db.execute("""
+        select blog_comments.id 
+        from blog_comments join blog_entries 
+            on entry_id = blog_entries.id
+        where blog_comments.id = %(commentId)s and 
+            (%(callsign)s is null or blog_entries.user = %(callsign)s or blog_comments.user = %(callsign)s)""",
+        {'commentId': commentId, 'callsign': callsign if callsign not in siteAdmins else None})
+    if not commentInDB:
+        return web.HTTPNotFound(text='Blog comment not found')
+    await db.execute("""
+        delete from blog_comments 
+        where id = %(commentId)s""",
+        {'commentId': commentId})
+    return web.Response(text='OK')
+
+
 
 async def createBlogCommentHandler(request):
     entryId = int(request.match_info.get('entry_id', None))
@@ -862,7 +889,7 @@ async def createBlogCommentHandler(request):
     await db.execute("""
         insert into blog_comments ("user", entry_id, txt)
         values (%(callsign)s, %(entryId)s, %(txt)s)""",
-        {"callsign": callsign, "entry_id": entry_id, "txt": data["text"]})
+        {"callsign": callsign, "entryId": entryId, "txt": data["text"]})
     return web.Response(text="OK")
 
 async def getBlogCommentsHandler(request):
@@ -1487,14 +1514,22 @@ async def chatHandler(request):
         insertChatMessage(path=chatPath, msgData=data, admin=admin)
     else:
         admins = siteAdmins + [stationSettings['admin'],] if station else siteAdmins
-        if not callsign in admins:
-            return web.HTTPUnauthorized(\
-                text='You must be logged in as station or site admin')
         if 'delete' in data:
             chat = loadJSON(chatPath)
             if not chat:
                 chat = []
-            chat = [ x for x in chat if x['ts'] != data['delete'] ]
+            if not callsign in admins:
+                message = [ x for x in chat if x['ts'] == data['delete'] ]
+                if message:
+                    message = message[0]
+                else:
+                    return web.HTTPNotFound(text='Message not found')
+                if message['cs'] != callsign:
+                    return web.HTTPUnauthorized(text='You must be logged in as station or site admin ')
+                chat = [ x for x in chat if x['ts'] != data['delete'] ]
+        else:
+            if not callsign in admins:
+                return web.HTTPUnauthorized(text='You must be logged in as station or site admin')
         with open(chatPath, 'w') as fChat:
             json.dump(chat, fChat, ensure_ascii = False)
     return web.Response(text = 'OK')
@@ -1594,7 +1629,8 @@ if __name__ == '__main__':
 
     APP.router.add_get('/aiohttp/blog/{entry_id}/comments', getBlogCommentsHandler)
     APP.router.add_post('/aiohttp/blog/{entry_id}/comments', createBlogCommentHandler)
- 
+    APP.router.add_delete('/aiohttp/blog/comments/{comment_id}', deleteBlogCommentHandler)
+
     db.verbose = True
 
     async def onStartup(_):
