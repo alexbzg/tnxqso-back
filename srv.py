@@ -816,7 +816,15 @@ async def getBlogEntriesHandler(request):
     data = await db.execute("""
             select id, "file", file_type, file_thumb, txt, 
                 to_char(timestamp_created, 'Dy, DD Mon YYYY HH24:MI:SS GMT') as last_modified,
-                to_char(timestamp_created, 'DD Mon YYYY HH24:MI') as post_datetime
+                to_char(timestamp_created, 'DD Mon YYYY HH24:MI') as post_datetime,
+                (select count(*) 
+                    from blog_reactions 
+                    where entry_id = blog_entries.id) as reactions,
+                (select blog_comments.id
+                    from blog_comments
+                    where entry_id = blog_entries.id
+                    order by blog_comments.id desc
+                    limit 1) as last_comment_id
             from blog_entries
             where "user" = %(callsign)s
             order by id desc
@@ -891,6 +899,61 @@ async def createBlogCommentHandler(request):
         values (%(callsign)s, %(entryId)s, %(txt)s)""",
         {"callsign": callsign, "entryId": entryId, "txt": data["text"]})
     return web.Response(text="OK")
+
+async def getBlogReactionHandler(request):
+    entryId = int(request.match_info.get('entry_id', None))
+    reactionType = int(request.match_info.get('type', None))
+    if not entryId:
+        return web.HTTPBadRequest(text = 'No valid post id was specified.')
+    data = await request.json()
+    callsign = decodeToken(data)
+    if not callsign or not (await getUserData(callsign))['email_confirmed']:
+        return web.HTTPUnauthorized(text='Email is not confirmed')
+    if not isinstance(callsign, str):
+        return callsign
+    reaction = await db.execute("""
+        select "type"
+        from blog_reactions
+        where entry_id = %(entryId)s and "user" = %(callsign)s and 
+            (%(type)s is null or "type" = %(type)s)""",
+        {"entryId": entryId, "callsign": callsign, "type": reactionType})
+    if not reaction:
+        return web.HTTPNotFound(text='Blog reaction not found')
+    return web.json_response(reaction)
+
+async def createBlogReactionHandler(request):
+    entryId = int(request.match_info.get('entry_id', None))
+    if not entryId:
+        return web.HTTPBadRequest(text = 'No valid post id was specified.')
+    data = await request.json()
+    callsign = decodeToken(data)
+    if not callsign or not (await getUserData(callsign))['email_confirmed']:
+        return web.HTTPUnauthorized(text='Email is not confirmed')
+    if not isinstance(callsign, str):
+        return callsign
+    await db.execute("""
+        insert into blog_reactions (entry_id, "user", "type")
+        values (%(entryId)s, %(callsign)s, %(type)s)
+        on conflict on constraint blog_reactions_pkey
+            do update set "type" = %(type)s""",
+        {"callsign": callsign, "entryId": entryId, "type": data["type"]})
+    return web.Response(text="OK")
+
+async def deleteBlogReactionHandler(request):
+    entryId = int(request.match_info.get('entry_id', None))
+    if not entryId:
+        return web.HTTPBadRequest(text = 'No valid post id was specified.')
+    data = await request.json()
+    callsign = decodeToken(data)
+    if not (await getUserData(callsign))['email_confirmed']:
+        return web.HTTPUnauthorized(text='Email is not confirmed')
+    if not isinstance(callsign, str):
+        return callsign
+    await db.execute("""
+        delete from blog_reactions
+        where entry_id = %(entryId)s and "user" = %(callsign)s""",
+        {'entryId': entryId, 'callsign': callsign})
+    return web.Response(text='OK')
 
 async def getBlogCommentsHandler(request):
     entryId = int(request.match_info.get('entry_id', None))
@@ -1630,6 +1693,10 @@ if __name__ == '__main__':
     APP.router.add_get('/aiohttp/blog/{entry_id}/comments', getBlogCommentsHandler)
     APP.router.add_post('/aiohttp/blog/{entry_id}/comments', createBlogCommentHandler)
     APP.router.add_delete('/aiohttp/blog/comments/{comment_id}', deleteBlogCommentHandler)
+
+    APP.router.add_post('/aiohttp/blog/{entry_id}/reactions/{type}', getBlogReactionHandler)
+    APP.router.add_put('/aiohttp/blog/{entry_id}/reactions', createBlogReactionHandler)
+    APP.router.add_delete('/aiohttp/blog/{entry_id}/reactions', deleteBlogReactionHandler)
 
     db.verbose = True
 
