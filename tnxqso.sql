@@ -21,6 +21,94 @@ SET default_tablespace = '';
 SET default_table_access_method = heap;
 
 --
+-- Name: blog_comments; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.blog_comments (
+    id bigint NOT NULL,
+    "user" character varying(32) NOT NULL,
+    entry_id bigint NOT NULL,
+    txt text NOT NULL,
+    timestamp_created timestamp without time zone DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+
+ALTER TABLE public.blog_comments OWNER TO postgres;
+
+--
+-- Name: blog_comments_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+CREATE SEQUENCE public.blog_comments_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER TABLE public.blog_comments_id_seq OWNER TO postgres;
+
+--
+-- Name: blog_comments_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
+--
+
+ALTER SEQUENCE public.blog_comments_id_seq OWNED BY public.blog_comments.id;
+
+
+--
+-- Name: blog_entries; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.blog_entries (
+    id bigint NOT NULL,
+    "user" character varying(32) NOT NULL,
+    file text,
+    file_type text,
+    txt text,
+    timestamp_created timestamp without time zone DEFAULT timezone('utc'::text, now()) NOT NULL,
+    file_thumb text,
+    media_width smallint
+);
+
+
+ALTER TABLE public.blog_entries OWNER TO postgres;
+
+--
+-- Name: blog_entries_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+CREATE SEQUENCE public.blog_entries_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER TABLE public.blog_entries_id_seq OWNER TO postgres;
+
+--
+-- Name: blog_entries_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
+--
+
+ALTER SEQUENCE public.blog_entries_id_seq OWNED BY public.blog_entries.id;
+
+
+--
+-- Name: blog_reactions; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.blog_reactions (
+    entry_id bigint NOT NULL,
+    "user" character varying(32) NOT NULL,
+    type smallint NOT NULL
+);
+
+
+ALTER TABLE public.blog_reactions OWNER TO postgres;
+
+--
 -- Name: dxpeditions; Type: TABLE; Schema: public; Owner: postgres
 --
 
@@ -159,10 +247,48 @@ CREATE TABLE public.users (
 ALTER TABLE public.users OWNER TO postgres;
 
 --
+-- Name: blog_comments id; Type: DEFAULT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.blog_comments ALTER COLUMN id SET DEFAULT nextval('public.blog_comments_id_seq'::regclass);
+
+
+--
+-- Name: blog_entries id; Type: DEFAULT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.blog_entries ALTER COLUMN id SET DEFAULT nextval('public.blog_entries_id_seq'::regclass);
+
+
+--
 -- Name: dxpeditions id; Type: DEFAULT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.dxpeditions ALTER COLUMN id SET DEFAULT nextval('public.dxpeditions_id_seq'::regclass);
+
+
+--
+-- Name: blog_comments blog_comments_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.blog_comments
+    ADD CONSTRAINT blog_comments_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: blog_entries blog_entries_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.blog_entries
+    ADD CONSTRAINT blog_entries_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: blog_reactions blog_reactions_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.blog_reactions
+    ADD CONSTRAINT blog_reactions_pkey PRIMARY KEY (entry_id, "user");
 
 
 --
@@ -220,6 +346,46 @@ CREATE UNIQUE INDEX callsign_qso_uq ON public.log USING btree (callsign, ((qso -
 
 
 --
+-- Name: blog_comments blog_comments_entry_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.blog_comments
+    ADD CONSTRAINT blog_comments_entry_id_fkey FOREIGN KEY (entry_id) REFERENCES public.blog_entries(id) ON UPDATE CASCADE ON DELETE CASCADE NOT VALID;
+
+
+--
+-- Name: blog_comments blog_comments_user_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.blog_comments
+    ADD CONSTRAINT blog_comments_user_fkey FOREIGN KEY ("user") REFERENCES public.users(callsign);
+
+
+--
+-- Name: blog_entries blog_entries_user_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.blog_entries
+    ADD CONSTRAINT blog_entries_user_fkey FOREIGN KEY ("user") REFERENCES public.users(callsign);
+
+
+--
+-- Name: blog_reactions blog_reactions_entry_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.blog_reactions
+    ADD CONSTRAINT blog_reactions_entry_id_fkey FOREIGN KEY (entry_id) REFERENCES public.blog_entries(id);
+
+
+--
+-- Name: blog_reactions blog_reactions_user_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.blog_reactions
+    ADD CONSTRAINT blog_reactions_user_fkey FOREIGN KEY ("user") REFERENCES public.users(callsign);
+
+
+--
 -- Name: dxpeditions dxpeditions_callsign_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -249,6 +415,41 @@ ALTER TABLE ONLY public.private_messages
 
 ALTER TABLE ONLY public.private_messages
     ADD CONSTRAINT private_messages_callsign_to_fkey FOREIGN KEY (callsign_to) REFERENCES public.users(callsign);
+
+
+--
+-- Name: TABLE blog_comments; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,UPDATE ON TABLE public.blog_comments TO "www-group";
+
+
+--
+-- Name: SEQUENCE blog_comments_id_seq; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT SELECT,USAGE ON SEQUENCE public.blog_comments_id_seq TO www;
+
+
+--
+-- Name: TABLE blog_entries; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,UPDATE ON TABLE public.blog_entries TO "www-group";
+
+
+--
+-- Name: SEQUENCE blog_entries_id_seq; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT SELECT,USAGE ON SEQUENCE public.blog_entries_id_seq TO www;
+
+
+--
+-- Name: TABLE blog_reactions; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,UPDATE ON TABLE public.blog_reactions TO "www-group";
 
 
 --
