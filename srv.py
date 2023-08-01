@@ -811,8 +811,10 @@ ADIF_QTH_FIELDS = ('MY_CNTY', 'MY_CITY', 'NOTES')
 
 async def getBlogEntriesHandler(request):
     callsign = request.match_info.get('callsign', None)
-    if not callsign:
-        return web.HTTPBadRequest(text = 'No callsign was specified.')
+    if callsign:
+        callsign = callsign.replace('-', '/')
+    else:
+       return web.HTTPBadRequest(text = 'No blog was specified.')
     data = await db.execute("""
             select id, "file", file_type, file_thumb, txt, 
                 to_char(timestamp_created, 'Dy, DD Mon YYYY HH24:MI:SS GMT') as last_modified,
@@ -835,6 +837,44 @@ async def getBlogEntriesHandler(request):
         return web.HTTPNotFound(text='Blog entries not found')
     
     return web.json_response(data, headers={'last-modified': data[0]['last_modified']})
+
+async def getBlogCommentsReadHandler(request):
+    blogCallsign = request.match_info.get('callsign', None)
+    if blogCallsign:
+        blogCallsign = blogCallsign.replace('-', '/')
+    else:
+        return web.HTTPBadRequest(text = 'No blog was specified.')
+    data = await request.json()
+    callsign = decodeToken(data)
+    if not isinstance(callsign, str):
+        return callsign
+    commentsRead = await db.execute("""
+        select blog_comments_read.entry_id, last_read_comment_id 
+        from blog_comments_read join blog_entries on
+            blog_entries.id = blog_comments_read.entry_id
+        where blog_entries.user = %(blogCallsign)s and
+            blog_comments_read.user = %(callsign)s""",
+        {"blogCallsign": blogCallsign, "callsign": callsign},
+        container="list")
+    if not commentsRead:
+        return web.HTTPNotFound(text='Blog entries not found')
+    return web.json_response({x['entry_id']: x['last_read_comment_id'] for x in commentsRead})
+
+async def setBlogCommentsReadHandler(request):
+    entryId = int(request.match_info.get('entry_id', None))
+    if not entryId:
+        return web.HTTPBadRequest(text = 'No valid post id was specified.')
+    data = await request.json()
+    callsign = decodeToken(data)
+    if not isinstance(callsign, str):
+        return callsign
+    await db.execute("""
+        insert into blog_comments_read (entry_id, "user", last_read_comment_id)
+        values (%(entryId)s, %(callsign)s, %(commentId)s)
+        on conflict on constraint blog_comments_read_pkey
+        do update set last_read_comment_id = %(commentId)s""",
+        {"entryId": entryId, "callsign": callsign, "commentId": data['commentId']})
+    return web.Response(text="OK")
 
 async def deleteBlogEntryHandler(request):
     entryId = int(request.match_info.get('entry_id', None))
@@ -1697,6 +1737,9 @@ if __name__ == '__main__':
     APP.router.add_post('/aiohttp/blog/{entry_id}/reactions/{type}', getBlogReactionHandler)
     APP.router.add_put('/aiohttp/blog/{entry_id}/reactions', createBlogReactionHandler)
     APP.router.add_delete('/aiohttp/blog/{entry_id}/reactions', deleteBlogReactionHandler)
+
+    APP.router.add_post('/aiohttp/blog/{callsign}/comments/read', getBlogCommentsReadHandler)
+    APP.router.add_put('/aiohttp/blog/{entry_id}/comments/read', setBlogCommentsReadHandler)
 
     db.verbose = True
 

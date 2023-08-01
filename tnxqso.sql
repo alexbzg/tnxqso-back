@@ -57,6 +57,19 @@ ALTER SEQUENCE public.blog_comments_id_seq OWNED BY public.blog_comments.id;
 
 
 --
+-- Name: blog_comments_read; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.blog_comments_read (
+    entry_id integer NOT NULL,
+    "user" character varying(32) NOT NULL,
+    last_read_comment_id integer NOT NULL
+);
+
+
+ALTER TABLE public.blog_comments_read OWNER TO postgres;
+
+--
 -- Name: blog_entries; Type: TABLE; Schema: public; Owner: postgres
 --
 
@@ -276,6 +289,14 @@ ALTER TABLE ONLY public.blog_comments
 
 
 --
+-- Name: blog_comments_read blog_comments_read_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.blog_comments_read
+    ADD CONSTRAINT blog_comments_read_pkey PRIMARY KEY (entry_id, "user");
+
+
+--
 -- Name: blog_entries blog_entries_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -354,6 +375,22 @@ ALTER TABLE ONLY public.blog_comments
 
 
 --
+-- Name: blog_comments_read blog_comments_read_entry_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.blog_comments_read
+    ADD CONSTRAINT blog_comments_read_entry_id_fkey FOREIGN KEY (entry_id) REFERENCES public.blog_entries(id);
+
+
+--
+-- Name: blog_comments_read blog_comments_read_user_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.blog_comments_read
+    ADD CONSTRAINT blog_comments_read_user_fkey FOREIGN KEY ("user") REFERENCES public.users(callsign);
+
+
+--
 -- Name: blog_comments blog_comments_user_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -429,6 +466,13 @@ GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,UPDATE ON TABLE public.blog_commen
 --
 
 GRANT SELECT,USAGE ON SEQUENCE public.blog_comments_id_seq TO www;
+
+
+--
+-- Name: TABLE blog_comments_read; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT SELECT,INSERT,REFERENCES,DELETE,UPDATE ON TABLE public.blog_comments_read TO "www-group";
 
 
 --
