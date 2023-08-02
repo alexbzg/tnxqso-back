@@ -1132,8 +1132,10 @@ async def createBlogEntryHandler(request):
 
 async def deleteBlogEntry(entry, stationPath):
     if entry['file']:
-        os.unlink(f"{stationPath}/{entry['file']}")
-        os.unlink(f"{stationPath}/{entry['file_thumb']}")
+        if os.path.isfile(f"{stationPath}/{entry['file']}"):
+            os.unlink(f"{stationPath}/{entry['file']}")
+        if os.path.isfile(f"{stationPath}/{entry['file_thumb']}"):
+            os.unlink(f"{stationPath}/{entry['file_thumb']}")
     await db.execute("""
         delete from blog_entries
         where id = %(id)s""", entry)
@@ -1629,7 +1631,7 @@ async def chatHandler(request):
                     return web.HTTPNotFound(text='Message not found')
                 if message['cs'] != callsign:
                     return web.HTTPUnauthorized(text='You must be logged in as station or site admin ')
-                chat = [ x for x in chat if x['ts'] != data['delete'] ]
+            chat = [ x for x in chat if x['ts'] != data['delete'] ]
         else:
             if not callsign in admins:
                 return web.HTTPUnauthorized(text='You must be logged in as station or site admin')

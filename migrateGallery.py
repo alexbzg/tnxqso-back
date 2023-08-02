@@ -28,6 +28,8 @@ async def main():
         gallery = loadJSON(f"{station}/gallery.json")
         if settings and gallery and settings.get('admin'):
             for item in gallery[::-1]:
+                if not item.get('datetime'):
+                    continue
                 await db.execute("""
                     insert into blog_entries
                         ("user", "file", file_type, file_thumb, txt, timestamp_created)
