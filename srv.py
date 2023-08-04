@@ -1729,7 +1729,8 @@ if __name__ == '__main__':
     APP.router.add_get('/aiohttp/adif/{callsign}', exportAdifHandler)
 
     APP.router.add_get('/aiohttp/blog/{callsign}', getBlogEntriesHandler)
-    APP.router.add_post('/aiohttp/blog/', createBlogEntryHandler)
+    APP.router.add_post('/aiohttp/blog', createBlogEntryHandler)
+    APP.router.add_post('/aiohttp/gallery', createBlogEntryHandler)
     APP.router.add_delete('/aiohttp/blog/{entry_id}', deleteBlogEntryHandler)
 
     APP.router.add_get('/aiohttp/blog/{entry_id}/comments', getBlogCommentsHandler)
