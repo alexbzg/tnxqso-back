@@ -75,8 +75,7 @@ if not defUserSettings:
     defUserSettings = {}
 
 jsonTemplates = {'settings': defUserSettings, \
-    'log': [], 'chat': [], 'news': [], 'cluster': [], 'status': {}, \
-    'chatUsers': {}}
+    'log': [], 'chat': [], 'news': [], 'cluster': [], 'status': {} }
 
 RAFA_LOCS = {}
 with open(appRoot + '/rafa.csv', 'r') as f_rafa:
@@ -480,13 +479,15 @@ async def userSettingsHandler(request):
         newStationCallsign = data['settings']['station']['callsign']
         if stationCallsign != newStationCallsign:
             newPath = getStationPath(newStationCallsign) if newStationCallsign else None
-            if stationPath and os.path.exists(stationPath):
-                shutil.rmtree(stationPath)
             if newStationCallsign:
                 if os.path.exists(newPath):
                     return web.HTTPBadRequest(text=
                         f'Station callsign {newStationCallsign.upper()} is already registered')
                 createStationDir(newPath)
+                if stationPath and os.path.exists(f"{stationPath}/gallery"):
+                    os.rename(f"{stationPath}/gallery", f"{newPath}/gallery")
+                if stationPath and os.path.exists(f"{stationPath}/chat.json"):
+                    os.rename(f"{stationPath}/chat.json", f"{newPath}/chat.json")
                 if stationCallsign and stationCallsign in publish:
                     if newStationCallsign:
                         publish[newStationCallsign] = publish[stationCallsign]
@@ -542,7 +543,8 @@ async def saveStationSettings(stationCallsign, adminCallsign, settings):
                 json.dump(settings, fSettings, ensure_ascii = False)
 
 def createStationDir(path):
-    os.makedirs(path)
+    if not os.path.exists(path):
+        os.makedirs(path)
     for key, val in jsonTemplates.items():
         with open(f'{path}/{key}.json', 'w') as file:
             json.dump(val, file, ensure_ascii = False)
