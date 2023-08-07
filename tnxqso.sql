@@ -16,6 +16,39 @@ SET xmloption = content;
 SET client_min_messages = warning;
 SET row_security = off;
 
+--
+-- Name: is_callsign(character varying); Type: FUNCTION; Schema: public; Owner: postgres
+--
+
+CREATE FUNCTION public.is_callsign(callsign character varying) RETURNS boolean
+    LANGUAGE plpgsql IMMUTABLE
+    AS $_$
+begin
+  return callsign  ~ '^[\d]*[a-zA-Z]+\d+[a-zA-Z]+(/[\da-zA-Z])*$';
+end
+$_$;
+
+
+ALTER FUNCTION public.is_callsign(callsign character varying) OWNER TO postgres;
+
+--
+-- Name: tf_users_bi(); Type: FUNCTION; Schema: public; Owner: postgres
+--
+
+CREATE FUNCTION public.tf_users_bi() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+begin
+  if (new.chat_callsign is null or new_callsign = '') and is_callsign(new.callsign) then
+    new.chat_callsign = new.callsign;
+  end if;
+  return new;
+end;
+$$;
+
+
+ALTER FUNCTION public.tf_users_bi() OWNER TO postgres;
+
 SET default_tablespace = '';
 
 SET default_table_access_method = heap;
@@ -367,6 +400,13 @@ CREATE UNIQUE INDEX callsign_qso_uq ON public.log USING btree (callsign, ((qso -
 
 
 --
+-- Name: users tr_users_bi; Type: TRIGGER; Schema: public; Owner: postgres
+--
+
+CREATE TRIGGER tr_users_bi BEFORE INSERT ON public.users FOR EACH ROW EXECUTE FUNCTION public.tf_users_bi();
+
+
+--
 -- Name: blog_comments blog_comments_entry_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -379,7 +419,7 @@ ALTER TABLE ONLY public.blog_comments
 --
 
 ALTER TABLE ONLY public.blog_comments_read
-    ADD CONSTRAINT blog_comments_read_entry_id_fkey FOREIGN KEY (entry_id) REFERENCES public.blog_entries(id);
+    ADD CONSTRAINT blog_comments_read_entry_id_fkey FOREIGN KEY (entry_id) REFERENCES public.blog_entries(id) ON UPDATE CASCADE ON DELETE CASCADE NOT VALID;
 
 
 --
@@ -411,7 +451,7 @@ ALTER TABLE ONLY public.blog_entries
 --
 
 ALTER TABLE ONLY public.blog_reactions
-    ADD CONSTRAINT blog_reactions_entry_id_fkey FOREIGN KEY (entry_id) REFERENCES public.blog_entries(id);
+    ADD CONSTRAINT blog_reactions_entry_id_fkey FOREIGN KEY (entry_id) REFERENCES public.blog_entries(id) ON UPDATE CASCADE ON DELETE CASCADE NOT VALID;
 
 
 --
