@@ -899,6 +899,26 @@ async def deleteBlogEntryHandler(request):
     await deleteBlogEntry(entryInDB, stationPath)
     return web.Response(text='OK')
 
+async def clearBlogHandler(request):
+    data = await request.json()
+    callsign = decodeToken(data)
+    if not (await getUserData(callsign))['email_confirmed']:
+        return web.HTTPUnauthorized(text='Email is not confirmed')
+    if not isinstance(callsign, str):
+        return callsign
+    entriesInDB = await db.execute("""
+        select id, "file", file_thumb
+        from blog_entries
+        where "user" = %(callsign)s""",
+        {'callsign': callsign},
+        container="list")
+    if entriesInDB:
+        stationPath = await getStationPathByAdminCS(callsign)
+        for entry in entriesInDB:
+            await deleteBlogEntry(entry, stationPath)
+    return web.Response(text='OK')
+
+
 async def deleteBlogCommentHandler(request):
     commentId = int(request.match_info.get('comment_id', None))
     if not commentId:
@@ -1734,6 +1754,7 @@ if __name__ == '__main__':
     APP.router.add_post('/aiohttp/blog', createBlogEntryHandler)
     APP.router.add_post('/aiohttp/gallery', createBlogEntryHandler)
     APP.router.add_delete('/aiohttp/blog/{entry_id}', deleteBlogEntryHandler)
+    APP.router.add_post('/aiohttp/blog/clear', clearBlogHandler)
 
     APP.router.add_get('/aiohttp/blog/{entry_id}/comments', getBlogCommentsHandler)
     APP.router.add_post('/aiohttp/blog/{entry_id}/comments', createBlogCommentHandler)
