@@ -40,7 +40,7 @@ CREATE FUNCTION public.tf_users_bi() RETURNS trigger
     AS $$
 begin
   if (new.chat_callsign is null or new_callsign = '') and is_callsign(new.callsign) then
-    new.chat_callsign = new.callsign;
+    new.chat_callsign = upper(new.callsign);
   end if;
   return new;
 end;
