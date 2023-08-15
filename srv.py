@@ -488,6 +488,10 @@ async def userSettingsHandler(request):
                     os.rename(f"{stationPath}/gallery", f"{newPath}/gallery")
                 if stationPath and os.path.exists(f"{stationPath}/chat.json"):
                     os.rename(f"{stationPath}/chat.json", f"{newPath}/chat.json")
+                if stationCallsign:
+                    await db.execute(
+                        "delete from log where callsign = %(callsign)s",
+                        {'callsign': stationCallsign})
                 if stationCallsign and stationCallsign in publish:
                     if newStationCallsign:
                         publish[newStationCallsign] = publish[stationCallsign]
@@ -1657,6 +1661,11 @@ async def chatHandler(request):
         else:
             if not callsign in admins:
                 return web.HTTPUnauthorized(text='You must be logged in as station or site admin')
+            if data.get('keepPinned'):
+                chat = loadJSON(chatPath)
+                if not chat:
+                    chat = []
+                chat = [m for m in chat if m['admin'] and m['text'].startswith('***')]
         with open(chatPath, 'w') as fChat:
             json.dump(chat, fChat, ensure_ascii = False)
     return web.Response(text = 'OK')
