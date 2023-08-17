@@ -739,6 +739,7 @@ async def locationHandler(request):
         fromCallsign = stationSettings['station']['callsign']
         insertChatMessage(path=stationPath + '/chat.json',
             msgData={'from': fromCallsign,
+            'cs': callsign,
             'text': '<b><i>' + newData['freq'] + '</b></i>'},
             admin=True)
     country = stationSettings['qthCountry'] if 'qthCountry' in stationSettings else None
@@ -1376,8 +1377,8 @@ async def dbInsertQso(callsign, qso):
         qsoInDB = await db.execute("""
             select qso from log
             where callsign = %(callsign)s and (qso->>'cs') = %(cs)s and 
-                (qso->>'qso_ts') = %(qso_ts) and (qso->>'band') = %(band)""",
-            {'callsign': callsign, 'qso_ts': qso['qso_ts'], 'cs': qso['cs'], 'band': qso['band']})
+                (qso->>'qso_ts') = %(qso_ts)s and (qso->>'band') = %(band)s""",
+            {'callsign': callsign, 'qso_ts': str(qso['qso_ts']), 'cs': qso['cs'], 'band': qso['band']})
         if qsoInDB:
             return qsoInDB.get('ts')
 
@@ -1534,6 +1535,8 @@ async def banUserHandler(request):
     if callsign not in siteAdmins:
         return web.HTTPUnauthorized(text='You must be logged in as site admin')
     userData = await getUserData(data['user'])
+    if not userData:
+        return web.HTTPNotFound(text='User not found')
     altLogins = await db.execute(
             """select callsign
                 from users

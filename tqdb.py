@@ -92,14 +92,14 @@ class DBConn:
                     logging.debug( params )
                 await cur.execute( sql, params )                                
                 res = ( await toDict(cur, container, keyColumn) ) if cur.description != None else True
-            except psycopg2.Error as e:
+            except Exception as e:
                 logging.exception( "Error executing: " + sql + "\n" )
                 stack = traceback.extract_stack()
                 logging.error( stack )
                 if params:
                     logging.error( "Params: " )
                     logging.error( params )
-                if e.pgerror:
+                if hasattr(e, 'pgerror'):
                     logging.error(  e.pgerror )
                     self.error = e.pgerror
         return res
