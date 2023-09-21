@@ -538,6 +538,7 @@ async def userSettingsHandler(request):
 
 async def saveStationSettings(stationCallsign, adminCallsign, settings):
     settings['admin'] = adminCallsign
+    settings['initialized'] = True
     await db.paramUpdate('users', {'callsign': adminCallsign}, \
         {'settings': json.dumps(settings)})
     if stationCallsign:
@@ -566,7 +567,7 @@ def decodeToken(data):
         if 'callsign' in payload:
             callsign = payload['callsign'].lower()
         if 'time' in payload and time.time() - payload['time'] > 60 * 60:
-            return web.HTTPUnauthorized(text='Expitred token')
+            return web.HTTPUnauthorized(text='Expired token')
         if 'email' in payload:
             email = payload['email']
     if callsign and callsign in BANLIST['callsigns']:
@@ -577,7 +578,7 @@ def decodeToken(data):
         return (callsign, email)
     if callsign:
         return callsign
-    return web.HTTPBadRequest(text='Not logged in')
+    return web.HTTPUnathorized(text='Not logged in')
 
 def sind(deg):
     return math.sin(math.radians(deg))

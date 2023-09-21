@@ -33,7 +33,6 @@ def spliceParams( data, params ):
         if param in data }
 
 async def initConnection( cn ):
-    cn.set_client_encoding( 'UTF8' )
     logging.debug( 'new db connection' )
 
 
@@ -50,10 +49,16 @@ class DBConn:
         try:
             self.pool = await aiopg.create_pool( self.dsn, maxsize=3,\
                     on_connect = initConnection  )
-            logging.debug( 'db connections pool created' )
+            logging.debug( 'db connections pool is created' )
         except:
             logging.exception( 'Error creating connection pool' )
             logging.error( self.dsn )
+
+    async def disconnect(self):
+        self.pool.close()
+        logging.debug( 'closing db connections pool' )
+        await self.pool.wait_closed()
+        logging.debug( 'db connections pool was closed' )
 
     async def fetch( self, sql, params = None ):
         res = False
