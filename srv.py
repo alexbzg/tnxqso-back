@@ -488,6 +488,8 @@ async def userSettingsHandler(request):
                     os.rename(f"{stationPath}/gallery", f"{newPath}/gallery")
                 if stationPath and os.path.exists(f"{stationPath}/chat.json"):
                     os.rename(f"{stationPath}/chat.json", f"{newPath}/chat.json")
+                if stationPath and os.path.exists(stationPath):
+                    shutil.rmtree(stationPath)
                 if stationCallsign:
                     await db.execute(
                         "delete from log where callsign = %(callsign)s",
@@ -567,7 +569,7 @@ def decodeToken(data):
         if 'callsign' in payload:
             callsign = payload['callsign'].lower()
         if 'time' in payload and time.time() - payload['time'] > 60 * 60:
-            return web.HTTPUnauthorized(text='Expired token')
+            return web.HTTPUnauthorized(text='Expitred token')
         if 'email' in payload:
             email = payload['email']
     if callsign and callsign in BANLIST['callsigns']:
@@ -578,7 +580,7 @@ def decodeToken(data):
         return (callsign, email)
     if callsign:
         return callsign
-    return web.HTTPUnathorized(text='Not logged in')
+    return web.HTTPBadRequest(text='Not logged in')
 
 def sind(deg):
     return math.sin(math.radians(deg))
