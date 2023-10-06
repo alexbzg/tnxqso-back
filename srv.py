@@ -1077,7 +1077,7 @@ async def createBlogEntryHandler(request):
                 (
                     ffmpeg
                         .input(filePath)
-                        .output(tnSrc, vframes=1)
+                        .output(tnSrc, vframes=1, vf="thumbnail")
                         .run()
                 )
                 videoProps = ffmpeg.probe(filePath)
