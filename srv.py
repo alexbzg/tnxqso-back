@@ -1081,7 +1081,8 @@ async def createBlogEntryHandler(request):
                         .run()
                 )
                 videoProps = ffmpeg.probe(filePath)
-                if videoProps['streams'][0]['height'] > 720:
+                videoStream = [stream for stream in videoProps['streams'] if stream['codec_type'] == 'video'][0]
+                if videoStream['height'] > 720:
                     tmpFilePath = f"{galleryPath}/{fileNameBase}_tmp.{fileExt}"
                     os.rename(filePath, tmpFilePath)
                     (
