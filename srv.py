@@ -1082,7 +1082,8 @@ async def createBlogEntryHandler(request):
                 )
                 videoProps = ffmpeg.probe(filePath)
                 videoStream = [stream for stream in videoProps['streams'] if stream['codec_type'] == 'video'][0]
-                if videoStream['height'] > 720:
+                maxVideoHeight = int(conf['gallery']['max_video_height'])
+                if videoStream['height'] > maxVideoHeight:
                     tmpFilePath = f"{galleryPath}/{fileNameBase}_tmp.{fileExt}"
                     os.rename(filePath, tmpFilePath)
                     (
@@ -1091,7 +1092,7 @@ async def createBlogEntryHandler(request):
                                 ffmpeg
                                     .input(tmpFilePath)
                                     .video
-                                    .filter('scale', -2, 720),
+                                    .filter('scale', -2, maxVideoHeight),
                                  ffmpeg
                                     .input(tmpFilePath)
                                     .audio,
