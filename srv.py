@@ -1247,6 +1247,26 @@ async def newsHandler(request):
         json.dump(news, fNews, ensure_ascii = False)
     return web.Response(text = 'OK')
 
+async def visitorsHandler(request):
+    data = await request.json()
+    visitor = decodeToken(data)
+    if not isinstance(visitor, str):
+        visitor = data.get('user_id')
+    if not visitor:
+        return web.HTTPBadRequest(text = 'No user data')
+    station = data.get('station')
+    if not station:
+        return web.HTTPBadRequest(text = 'No station data')
+    stationPath = getStationPath(data['station'])
+    if not os.path.isdir(stationPath):
+        return web.HTTPNotFound(text = 'Station not found')
+    visitors_path = stationPath + '/visitors.json'
+    visitors = loadJSON(visitors_path) or {}
+    visitors[visitor] = datetime.utcnow().timestamp()
+    with open(visitors_path, 'w') as visitors_file:
+        json.dump(visitors, visitors_file)
+    return web.Response(text = 'OK')
+
 async def activeUsersHandler(request):
     data = await request.json()
     callsign = decodeToken(data)
@@ -1783,6 +1803,8 @@ if __name__ == '__main__':
 
     APP.router.add_post('/aiohttp/blog/{callsign}/comments/read', getBlogCommentsReadHandler)
     APP.router.add_put('/aiohttp/blog/{entry_id}/comments/read', setBlogCommentsReadHandler)
+
+    APP.router.add_post('/aiohttp/visitors', visitorsHandler)
 
     db.verbose = True
 
