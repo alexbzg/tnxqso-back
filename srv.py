@@ -1262,7 +1262,7 @@ async def visitorsHandler(request):
         return web.HTTPNotFound(text = 'Station not found')
     visitors_path = stationPath + '/visitors.json'
     visitors = loadJSON(visitors_path) or {}
-    visitors[visitor] = datetime.utcnow().timestamp()
+    visitors.setdefault(visitor, {})[data['tab']] = datetime.utcnow().timestamp()
     with open(visitors_path, 'w') as visitors_file:
         json.dump(visitors, visitors_file)
     return web.Response(text = 'OK')
