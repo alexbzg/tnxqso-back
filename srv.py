@@ -494,6 +494,9 @@ async def userSettingsHandler(request):
                     await db.execute(
                         "delete from log where callsign = %(callsign)s",
                         {'callsign': stationCallsign})
+                    await db.execute(
+                        "delete from visitors where station = %(callsign)s",
+                        {'callsign': stationCallsign})
                 if stationCallsign and stationCallsign in publish:
                     if newStationCallsign:
                         publish[newStationCallsign] = publish[stationCallsign]
@@ -829,6 +832,7 @@ async def getBlogEntriesHandler(request):
             select id, "file", file_type, file_thumb, txt, 
                 to_char(timestamp_created, 'Dy, DD Mon YYYY HH24:MI:SS GMT') as last_modified,
                 to_char(timestamp_created, 'DD Mon YYYY HH24:MI') as post_datetime,
+                extract(epoch from timestamp_created) as ts,
                 (select count(*) 
                     from blog_reactions 
                     where entry_id = blog_entries.id) as reactions,
@@ -1252,20 +1256,51 @@ async def visitorsHandler(request):
     visitor = decodeToken(data)
     if not isinstance(visitor, str):
         visitor = data.get('user_id')
-    if not visitor:
-        return web.HTTPBadRequest(text = 'No user data')
-    station = data.get('station')
-    if not station:
-        return web.HTTPBadRequest(text = 'No station data')
-    stationPath = getStationPath(data['station'])
-    if not os.path.isdir(stationPath):
-        return web.HTTPNotFound(text = 'Station not found')
-    visitors_path = stationPath + '/visitors.json'
-    visitors = loadJSON(visitors_path) or {}
-    visitors.setdefault(visitor, {})[data['tab']] = datetime.utcnow().timestamp()
-    with open(visitors_path, 'w') as visitors_file:
-        json.dump(visitors, visitors_file)
+    await db.execute("""
+        insert into visitors (station, visitor, tab)
+        values (%(station)s, %(visitor)s, %(tab)s)
+        on conflict on constraint visitors_pkey do
+            update set visited = now();
+        """,
+        {'station': data['station'],
+            'visitor': visitor,
+            'tab': data['tab']})
     return web.Response(text = 'OK')
+
+async def visitorsStatsHandler(request):
+    data = await request.json()
+    callsign = decodeToken(data)
+    if not isinstance(callsign, str):
+        raise callsign
+    if callsign not in siteAdmins:
+        stationSettings = await db.execute("""
+        select settings from users
+        where callsign = %(callsign)s""",
+        {'callsign': callsign})
+        if stationSettings['station']['callsign'] != data['station']:
+            raise web.HTTPForbidden()
+    result = {'day': {}, 'week': {}, 'total': {}}
+    wheres = {'day': "and visited >= now() - interval '1 day'",
+            'week': "and visited >= now() - interval '1 week'",
+            'total': ""}
+    for period, where in wheres.items():
+        db_res = await db.execute(f"""
+            select tab, count(*) as visitors_count
+            from visitors
+            where station = %(station)s {where}
+            group by tab""",
+            {'station': data['station']})
+        if db_res:
+            if isinstance(db_res, dict):
+                db_res = [db_res]
+            for row in db_res:
+                result[period][row['tab']] = row['visitors_count']
+            result[period]['total'] = (await db.execute(f"""
+                select count(distinct visitor) as visitors_count
+                from visitors
+                where station = %(station)s {where}""",
+                {'station': data['station']}))['visitors_count']
+    return web.json_response(result)
 
 async def activeUsersHandler(request):
     data = await request.json()
@@ -1805,6 +1840,7 @@ if __name__ == '__main__':
     APP.router.add_put('/aiohttp/blog/{entry_id}/comments/read', setBlogCommentsReadHandler)
 
     APP.router.add_post('/aiohttp/visitors', visitorsHandler)
+    APP.router.add_post('/aiohttp/visitors/stats', visitorsStatsHandler)
 
     db.verbose = True
 

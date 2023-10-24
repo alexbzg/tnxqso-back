@@ -39,7 +39,7 @@ CREATE FUNCTION public.tf_users_bi() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
 begin
-  if (new.chat_callsign is null or new_callsign = '') and is_callsign(new.callsign) then
+  if (new.chat_callsign is null or new.chat_callsign = '') and is_callsign(new.callsign) then
     new.chat_callsign = upper(new.callsign);
   end if;
   return new;
@@ -293,6 +293,20 @@ CREATE TABLE public.users (
 ALTER TABLE public.users OWNER TO postgres;
 
 --
+-- Name: visitors; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.visitors (
+    station text NOT NULL,
+    visitor text NOT NULL,
+    tab text NOT NULL,
+    visited timestamp without time zone DEFAULT now() NOT NULL
+);
+
+
+ALTER TABLE public.visitors OWNER TO postgres;
+
+--
 -- Name: blog_comments id; Type: DEFAULT; Schema: public; Owner: postgres
 --
 
@@ -386,6 +400,14 @@ ALTER TABLE ONLY public.users
 
 
 --
+-- Name: visitors visitors_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.visitors
+    ADD CONSTRAINT visitors_pkey PRIMARY KEY (station, visitor, tab);
+
+
+--
 -- Name: callsign_qso_ts_log_idx; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -397,6 +419,13 @@ CREATE INDEX callsign_qso_ts_log_idx ON public.log USING btree (callsign, (((qso
 --
 
 CREATE UNIQUE INDEX callsign_qso_uq ON public.log USING btree (callsign, ((qso ->> 'cs'::text)), ((qso ->> 'qso_ts'::text)), ((qso ->> 'band'::text)));
+
+
+--
+-- Name: station_tab_visited_visitors_idx; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX station_tab_visited_visitors_idx ON public.visitors USING btree (station, tab, visited);
 
 
 --
@@ -598,6 +627,13 @@ GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,UPDATE ON TABLE public.qth_now_loc
 --
 
 GRANT SELECT,INSERT,REFERENCES,UPDATE ON TABLE public.users TO "www-group";
+
+
+--
+-- Name: TABLE visitors; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,UPDATE ON TABLE public.visitors TO "www-group";
 
 
 --
