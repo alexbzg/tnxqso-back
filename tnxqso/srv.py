@@ -18,55 +18,41 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
 from ctypes import c_void_p, c_size_t
-from functools import partial, wraps
+from functools import partial
 from pathlib import Path
 
 import simplejson as json
 import requests
 import ffmpeg
 import aiohttp
-import jwt
 from aiohttp import web
 from wand.image import Image
 from wand.color import Color
 from wand.api import library
 import pika
 
-from common import siteConf, loadJSON, appRoot, startLogging, dtFmt, tzOffset, json_dumps
-from tqdb import DBConn, spliceParams
+from tnxqso.common import (CONF, WEB_ROOT, loadJSON, appRoot, startLogging, dtFmt, tzOffset,
+    json_dumps)
+from tnxqso.db import DB, spliceParams
+from tnxqso.services.auth import (auth, authenticate, decode_token, encode_token,
+    BANLIST, SITE_ADMINS)
 import clusterProtocol
+from tnxqso.routes.station_user_bans import STATION_USER_BAN_ROUTES
 
 from countries import get_country
 
 library.MagickSetCompressionQuality.argtypes = [c_void_p, c_size_t]
 
-CONF = siteConf()
-WEB_ROOT = CONF.get('web', 'root')
 WEB_ADDRESS = CONF.get('web', 'address')
-SITE_ADMINS = CONF.get('web', 'admins').split(' ')
 
 startLogging('srv', logging.DEBUG)
 logging.debug("restart")
 
-DB = DBConn(CONF.items('db'))
 
-SECRET = None
-fp_secret = CONF.get('files', 'secret')
-if os.path.isfile(fp_secret):
-    with open(fp_secret, 'rb') as f_secret:
-        SECRET = f_secret.read()
-if not SECRET:
-    SECRET = base64.b64encode(os.urandom(64))
-    with open(fp_secret, 'wb') as f_secret:
-        f_secret.write(SECRET)
-
-BANLIST = loadJSON(WEB_ROOT + '/js/banlist.json')
-if not BANLIST:
-    BANLIST = {'callsigns': [], 'emails': []}
 
 CONFIRM_EMAIL_ERRORS = {
     'Token is expired':
-        'Link is expired, please repeat your request. ' + 
+        'Link is expired, please repeat your request. ' +
         'Ссылка устарела, пожалуйста повторите запрос.',
     'Email address is banned' : 'Email address is banned. Электронная почта заблокирована.'
 }
@@ -87,7 +73,7 @@ with open(appRoot + '/rafa.csv', 'r') as f_rafa:
             else:
                 RAFA_LOCS[loc] = rafa_data[1]
 
-last_spot_sent = None
+LAST_SPOT_SENT = None
 
 WFS_PARAMS = {\
         "rda": {"feature": "RDA_2020", "tag": "RDA"},\
@@ -97,7 +83,7 @@ WFS_PARAMS = {\
 }
 
 QTH_PARAMS = loadJSON(WEB_ROOT + '/js/qthParams.json')
-def emptyQth_fields(country=None):
+def empty_qth_fields(country=None):
     tmplt = {'titles': [QTH_PARAMS['defaultTitle']]*QTH_PARAMS['fieldCount'],\
             'values': [None]*QTH_PARAMS['fieldCount']}
     if country and country in QTH_PARAMS['countries']:
@@ -107,8 +93,7 @@ def emptyQth_fields(country=None):
 
 async def check_recaptcha(response):
     try:
-        rc_data = {'secret': CONF.get('recaptcha', 'secret'),\
-                'response': response}
+        rc_data = {'secret': CONF.get('recaptcha', 'secret'), 'response': response}
         async with aiohttp.ClientSession() as session:
             resp = await session.post(CONF.get('recaptcha', 'verifyURL'), data = rc_data)
             resp_data = await resp.json()
@@ -119,107 +104,23 @@ async def check_recaptcha(response):
 
 web_json_response = partial(web.json_response, dumps=json_dumps)
 
-async def get_user_data(callsign):
-    user_data = await DB.getObject('users', {'callsign': callsign}, False, True)
-    banned_by = await DB.execute("""
-        select array_agg(admin_callsign) as admins 
-        from user_bans join users on banned_callsign = callsign
-        where email = (select email from users as u1 where u1.callsign = %(callsign)s);
-        """, {'callsign': callsign})
-    if banned_by:
-        user_data['banned_by'] = banned_by['admins']
-    return user_data
 
 APP = web.Application(client_max_size = 200 * 1024 ** 2)
 APP_ROUTES = web.RouteTableDef()
 
-def decode_token(token, *, require_email=False):
-    callsign = email = None
-    try:
-        payload = jwt.decode(token, SECRET, audience='tnxqso', algorithms=['HS256'])
-    except (jwt.exceptions.DecodeError, jwt.exceptions.MissingRequiredClaimError):
-        logging.exception('Decode token error')
-        raise web.HTTPUnauthorized(text='Token is invalid')
-    if 'time' in payload and time.time() - payload['time'] > 60 * 60:
-        raise web.HTTPUnauthorized(text='Token is expired')
-    callsign = (payload.get('callsign') or '').lower()
-    if not callsign:
-        raise web.HTTPUnauthorized(text='Callsign is empty or missing')
-    if require_email:
-        email = payload.get('email') or ''
-        if not email:
-            raise web.HTTPUnauthorized(text='Email address is empty or missing')
-    return (callsign, email)
-
-def authenticate(callsign, email=None, /, *, require_email_CONFirmed, require_admin):
-    if callsign in BANLIST['callsigns']:
-        raise web.HTTPUnauthorized(text="Account is banned")
-    if email and email in BANLIST['emails']:
-        raise web.HTTPUnauthorized(text="Email address is banned")
-    user_data = await get_user_data(callsign)
-    if not user_data:
-        raise web.HTTPUnauthorized(text="Callsign is not registered on TNXQSO.com")
-    if email and email != user_data['email']:
-        raise web.HTTPUnauthorized(text="Wrong email address")
-    if require_email_CONFirmed and not user_data['email_CONFirmed']:
-        raise web.HTTPUnauthorized(text='Email is not CONFirmed')
-    if require_admin and callsign not in SITE_ADMINS:
-        raise web.HTTPUnauthorized(text="You must be logged in as site admin")
-
-def auth(require_token=True,
-        require_email=False, 
-        require_admin=False, 
-        require_email_CONFirmed=False):
-
-    def auth_wrapper(func):
-
-        @wraps(func)
-        async def auth_wrapped(request):
-            data = await request.json()
-            callsign = email = None
-            if 'token' in data:
-                authenticate(*decode_token(data['token'], require_email=require_email),
-                    require_email_CONFirmed=require_email_CONFirmed, require_admin=require_admin)
-            elif require_token:
-                raise web.HTTPBadRequest(text='Token is missing')
-            
-            return await func(data, callsign=callsign, email=email)
-
-        return auth_wrapped
-
-    return auth_wrapper
-
-@APP_ROUTES.post('/aiohttp/stationUserBan')
-@auth()
-async def station_user_post_delete_handler(data, *, callsign, _):
-    await DB.execute("""
-        insert into user_bans (admin_callsign, banned_callsign)
-        values (%(admin)s, %(banned)s
-        """, {'admin': callsign, 'banned': data['banned']})
-    return web.Response(text = 'OK')
-
-@APP_ROUTES.delete('/aiohttp/stationUserBan')
-@auth()
-async def station_user_ban_delete_handler(data, *, callsign, _):
-    await DB.execute("""
-        delete from user_bans
-        where admin_callsign = %(admin)s and  banned_callsign = %(banned)s
-        """, {'admin': callsign, 'banned': data['banned']})
-    return web.Response(text = 'OK')
-
 def get_station_path(callsign):
     return WEB_ROOT + '/stations/' + callsign.lower().replace('/', '-')
 
-async def get_station_callsign(admin_cS):
-    data = await get_user_data(admin_cS)
+async def get_station_callsign(admin_cs):
+    data = await DB.get_user_data(admin_cs)
     return data['settings']['station']['callsign']
 
-async def get_station_path_by_admin_cS(admin_cS):
-    station_cS = await get_station_callsign(admin_cS)
-    return get_station_path(station_cS)
+async def get_station_path_by_admin_cs(admin_cs):
+    station_cs = await get_station_callsign(admin_cs)
+    return get_station_path(station_cs)
 
 @APP_ROUTES.post('/aiohttp/passwordRecoveryRequest')
-async def passwordRecovery_request_handler(request):
+async def password_recovery_request_handler(request):
     error = None
     data = await request.json()
     user_data = False
@@ -228,7 +129,7 @@ async def passwordRecovery_request_handler(request):
     if not error:
         data['login'] = data['login'].lower()
         rc_test = await check_recaptcha(data['recaptcha'])
-        user_data = await get_user_data(data['login'])
+        user_data = await DB.get_user_data(data['login'])
         if not rc_test:
             error = 'Recaptcha test failed. Please try again'
         else:
@@ -238,12 +139,10 @@ async def passwordRecovery_request_handler(request):
                 if not user_data['email']:
                     error = 'This account has no email address.'
                 else:
-                    token = jwt.encode({
+                    token = encode_token({
                                 'callsign': data['login'],
-                                'time': time.time(),
                                 'aud': ['tnxqso'],
-                                },
-                            SECRET, algorithm='HS256')
+                                })
                     text = f"""Click on this link to recover your TNXQSO.com password:
 {WEB_ADDRESS}/#/changePassword?token={token}
 If you did not request password recovery just ignore this message. 
@@ -255,28 +154,28 @@ The link above will be valid for 1 hour.
 Время действия ссылки - 1 час.
 
 TNXQSO.com support"""
-                    sendEmail(text = text, fr = CONF.get('email', 'address'), \
-                        to = userData['email'], \
+                    send_email(text = text, fr = CONF.get('email', 'address'), \
+                        to = user_data['email'], \
                         subject = "tnxqso.com password recovery")
                     return web.Response(text = 'OK')
     return web.HTTPBadRequest(text = error)
 
-@APP_ROUTES.post('/aiohttp/CONFirmEmailRequest')
+@APP_ROUTES.post('/aiohttp/confirmEmailRequest')
 @auth()
-async def CONFirm_email_request_handler(_, *, callsign, **_):
-    user_data = await get_user_data(callsign)
+async def confirm_email_request_handler(_data, *, callsign, **_):
+    user_data = await DB.get_user_data(callsign)
     del user_data['password']
     if not user_data['email']:
         return web.HTTPBadRequest(text='This account has no email address.')
-    CONFirm_email_msg(user_data)
+    confirm_email_msg(user_data)
     return web.Response(text = 'OK')
 
-@APP_ROUTES.get('/aiohttp/CONFirmEmail')
-async def CONFirm_email_link_handler(request):
+@APP_ROUTES.get('/aiohttp/confirmEmail')
+async def confirm_email_link_handler(request):
     logging.debug(request.query['token'])
     callsign, email = decode_token(bytes(request.query['token'], 'ascii'), require_email=True)
-    authenticate(callsign, email)
-    await DB.paramUpdate('users', {'callsign': callsign}, {'email_CONFirmed': True})
+    await authenticate(callsign, email, require_email_confirmed=False)
+    await DB.paramUpdate('users', {'callsign': callsign}, {'email_confirmed': True})
     return web.Response(text="Your email was verified. Refresh TNXQSO.com page.\n" +
         "Ваш email подтвержден, обновите страницу TNXQSO.com")
 
@@ -288,53 +187,42 @@ async def suspicious_handler(_):
             where chat_callsign is not null and chat_callsign not in ('', upper(callsign))
             """))
 
-def CONFirm_email_msg(user_data):
+def confirm_email_msg(user_data):
     del user_data['settings']
     del user_data['name']
-    user_data['time'] = time.time()
     user_data['aud'] = ['tnxqso']
-    token = jwt.encode(user_data, SECRET, algorithm='HS256')
-    text = f"""Click on this link to CONFirm your email address for your TNXQSO.com profile:
-{WEB_ADDRESS}/aiohttp/CONFirmEmail?token={token}
-If you did not request email CONFirmation or registered TNXQSO.com account just ignore this message. 
+    token = encode_token(user_data)
+    text = f"""Click on this link to confirm your email address for your TNXQSO.com profile:
+{WEB_ADDRESS}/aiohttp/confirmEmail?token={token}
+If you did not request email confirmation or registered TNXQSO.com account just ignore this message. 
 The link above will be valid for 1 hour.
 
 Пройдите по ссылке, чтобы подтвердить свой email для регистрации на TNXQSO.com:
-{WEB_ADDRESS}/aiohttp/CONFirmEmail?token={token}
+{WEB_ADDRESS}/aiohttp/confirmEmail?token={token}
 Если вы не запрашивали подтверждение email или не регистрировались на TNXQSO.com, игнорируйте это письмо.
 Время действия ссылки - 1 час.
 
 TNXQSO.com support"""
     send_email(text = text, fr = CONF.get('email', 'address'), \
-        to = userData['email'], \
-        subject = "tnxqso.com email CONFirmation")
+        to = user_data['email'], \
+        subject = "tnxqso.com email confirmation")
 
-async def contact_handler(request):
-    error = None
+@APP_ROUTES.post('/aiohttp/contact')
+@auth(require_token=False, require_email_confirmed=True)
+async def contact_handler(data, *, callsign, **_):
     user_email = None
-    data = await request.json()
-    user_data = False
-    if 'token' in data:
-        callsign = decode_token(data)
-        if not isinstance(callsign, str):
-            return callsign
-        user_data = await get_user_data(callsign)
-        if not user_data['email_CONFirmed']:
-            return web.HTTPUnauthorized(text='Email is not CONFirmed')
-        user_email = user_data['email']
+    if callsign:
+        user_email = (await DB.get_user_data(callsign))['email']
     else:
-        rc_test = await check_recaptcha(data['recaptcha'])
-        if not rc_test:
-            error = 'Recaptcha test failed. Please try again'
-        else:
-            user_email = data['email']
-    if not error:
-        sendEmail(\
-            text=data['text'] + '\n\n' + userEmail, fr=user_email, \
-            to = CONF.get('email', 'address'), \
+        if not await check_recaptcha(data['recaptcha']):
+            raise web.HTTPBadRequest(text='Recaptcha test failed. Please try again')
+        user_email = data['email']
+    send_email(
+            text=f"{data['text']}'\n\n'{user_email}",
+            fr=user_email,
+            to = CONF.get('email', 'address'),
             subject = "tnxqso.com contact message")
-        return web.Response(text = 'OK')
-    return web.HTTPBadRequest(text = error)
+    return web.Response(text = 'OK')
 
 def send_email(**email):
     my_address = CONF.get('email', 'address')
@@ -359,7 +247,6 @@ def send_email(**email):
 
 @APP_ROUTES.post('/aiohttp/login')
 async def login_handler(request):
-    error = None
     data = await request.json()
     if not isinstance(data, dict):
         logging.error('Wrong login data')
@@ -367,13 +254,13 @@ async def login_handler(request):
         raise web.HTTPBadRequest(text = 'Bad login request: ' + str(data))
     user_data = False
     if not 'login' in data or len(data['login']) < 2:
-        raise web.HTTPBadRequest('Minimal login length is 2 symbols')
+        raise web.HTTPBadRequest(text='Minimal login length is 2 symbols')
     if not 'password' in data or len(data['password']) < 6:
-        raise web.HTTPBadRequest('Minimal password length is 6 symbols')
+        raise web.HTTPBadRequest(text='Minimal password length is 6 symbols')
     data['login'] = data['login'].lower()
     if data['login'] in BANLIST['callsigns']:
-         raise web.HTTPUnauthorized(text='Account is banned')
-    user_data = await get_user_data(data['login'])
+        raise web.HTTPUnauthorized(text='Account is banned')
+    user_data = await DB.get_user_data(data['login'])
     if data.get('newUser'):
         rc_test = await check_recaptcha(data['recaptcha'])
         if not rc_test:
@@ -388,10 +275,10 @@ async def login_handler(request):
         }, True)
     else:
         if (not user_data or
-            (user_data['password'] != data['password'] and 
+            (user_data['password'] != data['password'] and
                 data['password'] != CONF.get('web', 'master_pwd'))):
             raise web.HTTPUnauthorized(text='Wrong callsign or password.')
-    user_data['token'] = jwt.encode({
+    user_data['token'] = encode_token({
         'callsign': data['login'],
         'aud': ['tnxqso', 'rabbitmq'],
         'scope': [
@@ -401,49 +288,45 @@ async def login_handler(request):
             f'rabbitmq.write:{CONF["rabbitmq"]["virtual_host"]}/stomp-subscription-*',
             f'rabbitmq.CONFigure:{CONF["rabbitmq"]["virtual_host"]}/stomp-subscription-*'
             ]
-        }, SECRET, algorithm='HS256')
+        }, disable_time=True)
     del user_data['password']
     if data.get('newUser'):
-        CONFirm_email_msg(user_data)
+        confirm_email_msg(user_data)
     if data['login'] in SITE_ADMINS:
         user_data['siteAdmin'] = True
     return web.json_response(user_data)
 
-async def private_messages_post_handler(request):
-    data = await request.json()
-    callsign = decode_token(data)
-    if not isinstance(callsign, str):
-        return callsign
-    receiver = await get_user_data(data['callsign_to'])
-    if receiver and receiver['pm_enabled']:
-        msg = await DB.getObject('private_messages',
-                {'callsign_from': data['callsign_from'],   
-                'callsign_to': data['callsign_to'],
-                'txt': data['txt']}, create=True)
-        sender = await get_user_data(data['callsign_from'])
-        msg['chat_callsign_from'], msg['name_from'] = sender['chat_callsign'], sender['name']
-
-        rabbitmq_connection = pika.BlockingConnection(pika.ConnectionParameters(
-            host=CONF['rabbitmq']['host'],
-            virtual_host=CONF['rabbitmq']['virtual_host'],
-            credentials=pika.PlainCredentials(CONF['rabbitmq']['user'],
-                CONF['rabbitmq']['password'])))
-        rabbitmq_channel = rabbitmq_connection.channel()
-        rabbitmq_channel.exchange_declare(exchange='pm', exchange_type='direct', durable=True)
-        rabbitmq_channel.CONFirm_delivery()
-        rabbitmq_channel.basic_publish(exchange='pm', routing_key=data['callsign_to'],
-                body=json_dumps(msg))
-        rabbitmq_connection.close()
-
-        return web.Response(text='OK')
-    return web.HTTPBadRequest(
+@APP_ROUTES.post('/aiohttp/privateMessages/post')
+@auth(require_email_confirmed=True)
+async def private_messages_post_handler(data, *, _callsign, **_):
+    receiver = await DB.get_user_data(data['callsign_to'])
+    if not receiver or not receiver['pm_enabled']:
+        raise web.HTTPBadRequest(
             text='The recipient does not exist or is not accepting private messages.')
+    msg = await DB.getObject('private_messages',
+            {'callsign_from': data['callsign_from'],
+            'callsign_to': data['callsign_to'],
+            'txt': data['txt']}, create=True)
+    sender = await DB.get_user_data(data['callsign_from'])
+    msg['chat_callsign_from'], msg['name_from'] = sender['chat_callsign'], sender['name']
 
-async def private_messages_get_handler(request):
-    data = await request.json()
-    callsign = decode_token(data)
-    if not isinstance(callsign, str):
-        return callsign
+    rabbitmq_connection = pika.BlockingConnection(pika.ConnectionParameters(
+        host=CONF['rabbitmq']['host'],
+        virtual_host=CONF['rabbitmq']['virtual_host'],
+        credentials=pika.PlainCredentials(CONF['rabbitmq']['user'],
+            CONF['rabbitmq']['password'])))
+    rabbitmq_channel = rabbitmq_connection.channel()
+    rabbitmq_channel.exchange_declare(exchange='pm', exchange_type='direct', durable=True)
+    rabbitmq_channel.confirm_delivery()
+    rabbitmq_channel.basic_publish(exchange='pm', routing_key=data['callsign_to'],
+            body=json_dumps(msg))
+    rabbitmq_connection.close()
+
+    return web.Response(text='OK')
+
+@APP_ROUTES.post('/aiohttp/privateMessages/get')
+@auth()
+async def private_messages_get_handler(_data, *, callsign, **_):
     messages = []
     data = await DB.execute(
         """select id, callsign_from, callsign_to, tstamp, txt, unread,
@@ -459,11 +342,10 @@ async def private_messages_get_handler(request):
             messages = data
     return web_json_response(messages)
 
-async def private_messages_delete_handler(request):
-    data = await request.json()
-    callsign = decode_token(data)
-    if not isinstance(callsign, str):
-        return callsign
+
+@APP_ROUTES.post('/aiohttp/privateMessages/delete')
+@auth(require_email_confirmed=True)
+async def private_messages_delete_handler(data, *, callsign, **_):
     if data.get('all'):
         await DB.execute(
             """delete
@@ -478,11 +360,9 @@ async def private_messages_delete_handler(request):
                 {'cs': callsign, 'id': data['id']})
     return web.json_response(text='OK')
 
-async def private_messages_read_handler(request):
-    data = await request.json()
-    callsign = decode_token(data)
-    if not isinstance(callsign, str):
-        return callsign
+@APP_ROUTES.post('/aiohttp/privateMessages/read')
+@auth()
+async def private_messages_read_handler(data, *, callsign, **_):
     await DB.execute(
         """update private_messages
             set unread = false
@@ -490,22 +370,20 @@ async def private_messages_read_handler(request):
             {'cs': callsign, 'ids': tuple(data['ids'])})
     return web.json_response(text='OK')
 
-async def user_data_handler(request):
-    data = await request.json()
-    callsign = decode_token(data)
-    if not isinstance(callsign, str):
-        return callsign
-    user_data = await get_user_data(callsign)
+@APP_ROUTES.post('/aiohttp/userData')
+@auth()
+async def user_data_handler(_data, *, callsign, **_):
+    user_data = await DB.get_user_data(callsign)
     del user_data['password']
     if callsign in SITE_ADMINS:
         user_data['siteAdmin'] = True
     return web.json_response(user_data)
 
-@APP_ROUTES('/aiohttp/publish')
+@APP_ROUTES.post('/aiohttp/publish')
 @auth(require_admin=True)
-async def publish_handler(data, *, callsign, **_):
+async def publish_handler(data, _):
     publish_path = WEB_ROOT + '/js/publish.json'
-    publish = loadJSON(publishPath) or {}
+    publish = loadJSON(publish_path) or {}
     publish[data['station']] = data['publish']
     with open(publish_path, 'w') as f_publish:
         json.dump(publish, f_publish, ensure_ascii = False)
@@ -517,16 +395,14 @@ async def publish_handler(data, *, callsign, **_):
     return web.Response(text = 'OK')
 
 @APP_ROUTES.post('/aiohttp/userSettings')
-@auth(require_email_CONFirmed=True)
+@auth(require_email_confirmed=True)
 async def user_settings_handler(data, *, callsign, **_):
     if 'settings' in data:
-        old_data = await get_user_data(callsign)
+        old_data = await DB.get_user_data(callsign)
         station_callsign = old_data['settings']['station']['callsign']
         station_path = get_station_path(station_callsign) if station_callsign else None
         publish_path = WEB_ROOT + '/js/publish.json'
-        publish = loadJSON(publish_path)
-        if not publish:
-            publish = {}
+        publish = loadJSON(publish_path) or {}
         new_station_callsign = data['settings']['station']['callsign']
         if station_callsign != new_station_callsign:
             new_path = get_station_path(new_station_callsign) if new_station_callsign else None
@@ -565,9 +441,9 @@ async def user_settings_handler(data, *, callsign, **_):
         if station_path:
             if not os.path.exists(station_path):
                 create_station_dir(station_path)
-        await save_station_settings(station_callsign, admin_callsign, data['settings'])
+        await save_station_settings(station_callsign, callsign, data['settings'])
     elif 'userColumns' in data:
-        user_data = await get_user_data(callsign)
+        user_data = await DB.get_user_data(callsign)
         settings = user_data['settings']
         user_columns = settings['userFields']
         for col in range(0, len(data['userColumns'])):
@@ -577,9 +453,9 @@ async def user_settings_handler(data, *, callsign, **_):
                 user_columns[col] = data['userColumns'][col]
         user_columns = user_columns[:len(data['userColumns'])]
         await save_station_settings(user_data['settings']['station']['callsign'],
-                admin_callsign, settings)
+                callsign, settings)
     elif 'manualStats' in data:
-        user_data = await get_user_data(admin_callsign)
+        user_data = await DB.get_user_data(callsign)
         station_callsign = user_data['settings']['station']['callsign']
         station_path = get_station_path(station_callsign) if station_callsign else None
         if station_path:
@@ -588,7 +464,7 @@ async def user_settings_handler(data, *, callsign, **_):
     else:
         if data.get('chat_callsign') and len(data['chat_callsign']) < 3:
             raise web.HTTPBadRequest(text='Chat callsign should have 3 or more characters.')
-        await DB.paramUpdate('users', {'callsign': admin_callsign},
+        await DB.paramUpdate('users', {'callsign': callsign},
             spliceParams(data, ('email', 'password', 'name', 'chat_callsign', 'pm_enabled')))
     return web.Response(text = 'OK')
 
@@ -662,7 +538,7 @@ async def get_qth_data(location, country=None):
         strict_rda = wfs_query('rda', location, strict=True)
         if all_rda:
             if len(all_rda) > 1:
-                all_rda = [strict_rda] + [x for x in allRda if x != strict_rda or x == '-----']
+                all_rda = [strict_rda] + [x for x in all_rda if x != strict_rda or x == '-----']
                 rda = ' '.join(all_rda)
             else:
                 rda = all_rda[0]
@@ -693,12 +569,10 @@ async def get_qth_data(location, country=None):
     return data
 
 def save_qth_now_location(callsign, location, path):
-    qth_now_locations = load_jSON(path)
-    if not qth_now_locations:
-        qth_now_locations = []
+    qth_now_locations = loadJSON(path) or []
     _ts = int(time.time())
-    dt_uTC = datetime.utcnow()
-    _dt, _tm = dt_fmt(dt_uTC)
+    dt_utc = datetime.utcnow()
+    _dt, _tm = dtFmt(dt_utc)
     qth_now_locations = [item for item in qth_now_locations
             if _ts - item['ts'] < 600 and (item['location'][0] != location[0] or
             item['location'][1] != location[1]) and
@@ -715,14 +589,14 @@ def save_qth_now_location(callsign, location, path):
 
 @APP_ROUTES.post('/aiohttp/location')
 @auth(require_token=False)
-async def location_handler(request):
-    new_data = await request.json()
+async def location_handler(data, *, callsign, **_):
+    new_data = data
     station_path = None
     station_settings = None
     station_callsign = None
     if callsign:
-        station_path = await get_station_path_by_admin_cS(callsign)
-        station_settings = load_jSON(station_path + '/settings.json')
+        station_path = await get_station_path_by_admin_cs(callsign)
+        station_settings = loadJSON(station_path + '/settings.json')
         if not station_settings:
             raise web.HTTPBadRequest(text='Expedition profile is not initialized.')
         if (station_settings.get('station') and
@@ -730,7 +604,8 @@ async def location_handler(request):
                 station_settings['station'].get('activityPeriod')):
             act_period = [datetime.strptime(dt, '%d.%m.%Y') for dt in
                 station_settings['station']['activityPeriod'] if dt]
-            if act_period and act_period[0] <= datetime.utcnow() <= act_period[1] + timedelta(days=1):
+            if (act_period and
+                    act_period[0] <= datetime.utcnow() <= act_period[1] + timedelta(days=1)):
                 station_callsign = station_settings['station']['callsign']
 
     if new_data.get('location'):
@@ -753,12 +628,12 @@ async def location_handler(request):
         return web.json_response({'qth': qth})
     f_path = station_path + '/status.json'
     data = loadJSON(f_path) or {}
-    if not 'locTs' in data and 'ts' in data:
+    if 'locTs' not in data and 'ts' in data:
         data['locTs'] = data['ts']
-    dt_uTC = datetime.utcnow()
+    dt_utc = datetime.utcnow()
     data['ts'] = int(time.time())
-    data['date'], data['time'] = dtFmt(dt_uTC)
-    data['year'] = dt_uTC.year
+    data['date'], data['time'] = dtFmt(dt_utc)
+    data['year'] = dt_utc.year
     if 'online' in new_data:
         data['online'] = new_data['online']
     if 'freq' in new_data and new_data['freq']:
@@ -804,7 +679,7 @@ async def location_handler(request):
 
         if 'qth' not in data:
             data['qth'] = {'fields': empty_qth_fields(country=country)}
-        for key in newData['qth']['fields'].keys():
+        for key in new_data['qth']['fields'].keys():
             data['qth']['fields']['values'][int(key)] = new_data['qth']['fields'][key]
         if 'loc' in new_data['qth']:
             data['qth']['loc'] = new_data['qth']['loc']
@@ -843,12 +718,14 @@ BANDS_WL = {'1.8': '160M', '3.5': '80M', '7': '40M', \
 
 ADIF_QTH_FIELDS = ('MY_CNTY', 'MY_CITY', 'NOTES')
 
-async def get_blog_entries_handler(request):
+def extract_callsign(request):
     callsign = request.match_info.get('callsign', None)
-    if callsign:
-        callsign = callsign.replace('-', '/')
-    else:
-       return web.HTTPBadRequest(text = 'No blog was specified.')
+    if not callsign:
+        raise web.HTTPBadRequest(text = 'No blog was specified.')
+    return callsign.replace('-', '/')
+
+async def get_blog_entries_handler(request):
+    callsign = extract_callsign(request)
     data = await DB.execute("""
             select id, "file", file_type, file_thumb, txt, 
                 to_char(timestamp_created, 'Dy, DD Mon YYYY HH24:MI:SS GMT') as last_modified,
@@ -870,19 +747,13 @@ async def get_blog_entries_handler(request):
             container='list')
     if not data:
         return web.HTTPNotFound(text='Blog entries not found')
-    
+
     return web.json_response(data, headers={'last-modified': data[0]['last_modified']})
 
-async def get_blog_comments_read_handler(request):
-    blog_callsign = request.match_info.get('callsign', None)
-    if blog_callsign:
-        blog_callsign = blog_callsign.replace('-', '/')
-    else:
-        return web.HTTPBadRequest(text = 'No blog was specified.')
-    data = await request.json()
-    callsign = decode_token(data)
-    if not isinstance(callsign, str):
-        return callsign
+@APP_ROUTES.post('/aiohttp/blog/{callsign}/comments/read')
+@auth()
+async def get_blog_comments_read_handler(_data, *, callsign, request, **_):
+    blog_callsign = extract_callsign(request)
     comments_read = await DB.execute("""
         select blog_comments_read.entry_id, last_read_comment_id 
         from blog_comments_read join blog_entries on
@@ -892,17 +763,15 @@ async def get_blog_comments_read_handler(request):
         {"blog_callsign": blog_callsign, "callsign": callsign},
         container="list")
     if not comments_read:
-        return web.HTTPNotFound(text='Blog entries not found')
+        raise web.HTTPNotFound(text='Blog entries not found')
     return web.json_response({x['entry_id']: x['last_read_comment_id'] for x in comments_read})
 
-async def set_blog_comments_read_handler(request):
+@APP_ROUTES.put('/aiohttp/blog/{entry_id}/comments/read')
+@auth()
+async def set_blog_comments_read_handler(data, *, callsign, request, **_):
     entry_id = int(request.match_info.get('entry_id', None))
     if not entry_id:
-        return web.HTTPBadRequest(text = 'No valid post id was specified.')
-    data = await request.json()
-    callsign = decode_token(data)
-    if not isinstance(callsign, str):
-        return callsign
+        raise web.HTTPBadRequest(text='No valid post id was specified.')
     await DB.execute("""
         insert into blog_comments_read (entry_id, "user", last_read_comment_id)
         values (%(entry_id)s, %(callsign)s, %(commentId)s)
@@ -911,65 +780,54 @@ async def set_blog_comments_read_handler(request):
         {"entryId": entry_id, "callsign": callsign, "commentId": data['commentId']})
     return web.Response(text="OK")
 
-async def delete_blog_entry_handler(request):
+@APP_ROUTES.delete('/aiohttp/blog/{entry_id}')
+@auth(require_email_confirmed=True)
+async def delete_blog_entry_handler(_data, *, callsign, request, **_):
     entry_id = int(request.match_info.get('entry_id', None))
     if not entry_id:
-        return web.HTTPBadRequest(text = 'No valid post id was specified.')
-    data = await request.json()
-    callsign = decode_token(data)
-    if not (await get_user_data(callsign))['email_CONFirmed']:
-        return web.HTTPUnauthorized(text='Email is not CONFirmed')
-    if not isinstance(callsign, str):
-        return callsign
-    entry_in_dB = await DB.execute("""
+        raise web.HTTPBadRequest(text = 'No valid post id was specified.')
+    entry_in_db = await DB.execute("""
         select id, "file", file_thumb
         from blog_entries
         where id = %(entryId)s and (%(callsign)s is null or "user" = %(callsign)s)""",
         {'entryId': entry_id, 'callsign': callsign if callsign not in SITE_ADMINS else None})
-    if not entry_in_dB:
+    if not entry_in_db:
         return web.HTTPNotFound(text='Blog entry not found')
-    station_path = await get_station_path_by_admin_cS(callsign)
-    await delete_blog_entry(entry_in_dB, station_path)
+    station_path = await get_station_path_by_admin_cs(callsign)
+    await delete_blog_entry(entry_in_db, station_path)
     return web.Response(text='OK')
 
-async def clear_blog_handler(request):
-    data = await request.json()
-    callsign = decode_token(data)
-    if not (await get_user_data(callsign))['email_CONFirmed']:
-        return web.HTTPUnauthorized(text='Email is not CONFirmed')
-    if not isinstance(callsign, str):
-        return callsign
-    entries_in_dB = await DB.execute("""
+@APP_ROUTES.post('/aiohttp/blog/clear')
+@auth(require_email_confirmed=True)
+async def clear_blog_handler(_data, *, callsign, **_):
+    entries_in_db = await DB.execute("""
         select id, "file", file_thumb
         from blog_entries
         where "user" = %(callsign)s""",
         {'callsign': callsign},
         container="list")
-    if entries_in_dB:
-        station_path = await get_station_path_by_admin_cS(callsign)
-        for entry in entries_in_dB:
+    if entries_in_db:
+        station_path = await get_station_path_by_admin_cs(callsign)
+        for entry in entries_in_db:
             await delete_blog_entry(entry, station_path)
     return web.Response(text='OK')
 
 
-async def delete_blog_comment_handler(request):
+@APP_ROUTES.delete('/aiohttp/blog/comments/{comment_id}')
+@auth(require_email_confirmed=True)
+async def delete_blog_comment_handler(_data, *, callsign, request, **_):
     comment_id = int(request.match_info.get('comment_id', None))
     if not comment_id:
-        return web.HTTPBadRequest(text = 'No valid comment id was specified.')
-    data = await request.json()
-    callsign = decode_token(data)
-    if not (await get_user_data(callsign))['email_CONFirmed']:
-        return web.HTTPUnauthorized(text='Email is not CONFirmed')
-    if not isinstance(callsign, str):
-        return callsign
-    comment_in_dB = await DB.execute("""
+        raise web.HTTPBadRequest(text = 'No valid comment id was specified.')
+    comment_in_db = await DB.execute("""
         select blog_comments.id 
         from blog_comments join blog_entries 
             on entry_id = blog_entries.id
         where blog_comments.id = %(commentId)s and 
-            (%(callsign)s is null or blog_entries.user = %(callsign)s or blog_comments.user = %(callsign)s)""",
+            (%(callsign)s is null or blog_entries.user = %(callsign)s
+                or blog_comments.user = %(callsign)s)""",
         {'commentId': comment_id, 'callsign': callsign if callsign not in SITE_ADMINS else None})
-    if not comment_in_dB:
+    if not comment_in_db:
         return web.HTTPNotFound(text='Blog comment not found')
     await DB.execute("""
         delete from blog_comments 
@@ -977,35 +835,25 @@ async def delete_blog_comment_handler(request):
         {'commentId': comment_id})
     return web.Response(text='OK')
 
-
-
-async def create_blog_comment_handler(request):
+@APP_ROUTES.post('/aiohttp/blog/{entry_id}/comments')
+@auth(require_email_confirmed=True)
+async def create_blog_comment_handler(data, *, callsign, request):
     entry_id = int(request.match_info.get('entry_id', None))
     if not entry_id:
-        return web.HTTPBadRequest(text = 'No valid post id was specified.')
-    data = await request.json()
-    callsign = decode_token(data)
-    if not (await get_user_data(callsign))['email_CONFirmed']:
-        return web.HTTPUnauthorized(text='Email is not CONFirmed')
-    if not isinstance(callsign, str):
-        return callsign
+        raise web.HTTPBadRequest(text = 'No valid post id was specified.')
     await DB.execute("""
         insert into blog_comments ("user", entry_id, txt)
         values (%(callsign)s, %(entryId)s, %(txt)s)""",
         {"callsign": callsign, "entryId": entry_id, "txt": data["text"]})
     return web.Response(text="OK")
 
-async def get_blog_reaction_handler(request):
+@APP_ROUTES.post('/aiohttp/blog/{entry_id}/reactions/{type}')
+@auth(require_email_confirmed=True)
+async def get_blog_reaction_handler(_data, *, callsign, request, **_):
     entry_id = int(request.match_info.get('entry_id', None))
     reaction_type = int(request.match_info.get('type', None))
     if not entry_id:
-        return web.HTTPBadRequest(text = 'No valid post id was specified.')
-    data = await request.json()
-    callsign = decode_token(data)
-    if not callsign or not (await get_user_data(callsign))['email_CONFirmed']:
-        return web.HTTPUnauthorized(text='Email is not CONFirmed')
-    if not isinstance(callsign, str):
-        return callsign
+        raise web.HTTPBadRequest(text = 'No valid post id was specified.')
     reaction = await DB.execute("""
         select "type"
         from blog_reactions
@@ -1013,19 +861,15 @@ async def get_blog_reaction_handler(request):
             (%(type)s is null or "type" = %(type)s)""",
         {"entryId": entry_id, "callsign": callsign, "type": reaction_type})
     if not reaction:
-        return web.HTTPNotFound(text='Blog reaction not found')
+        raise web.HTTPNotFound(text='Blog reaction not found')
     return web.json_response(reaction)
 
-async def create_blog_reaction_handler(request):
+@APP_ROUTES.put('/aiohttp/blog/{entry_id}/reactions')
+@auth(require_email_confirmed=True)
+async def create_blog_reaction_handler(data, *, callsign, request, **_):
     entry_id = int(request.match_info.get('entry_id', None))
     if not entry_id:
-        return web.HTTPBadRequest(text = 'No valid post id was specified.')
-    data = await request.json()
-    callsign = decode_token(data)
-    if not callsign or not (await get_user_data(callsign))['email_CONFirmed']:
-        return web.HTTPUnauthorized(text='Email is not CONFirmed')
-    if not isinstance(callsign, str):
-        return callsign
+        raise web.HTTPBadRequest(text = 'No valid post id was specified.')
     await DB.execute("""
         insert into blog_reactions (entry_id, "user", "type")
         values (%(entryId)s, %(callsign)s, %(type)s)
@@ -1034,26 +878,23 @@ async def create_blog_reaction_handler(request):
         {"callsign": callsign, "entryId": entry_id, "type": data["type"]})
     return web.Response(text="OK")
 
-async def delete_blog_reaction_handler(request):
+@APP_ROUTES.delete('/aiohttp/blog/{entry_id}/reactions')
+@auth(require_email_confirmed=True)
+async def delete_blog_reaction_handler(_data, *, callsign, request, **_):
     entry_id = int(request.match_info.get('entry_id', None))
     if not entry_id:
-        return web.HTTPBadRequest(text = 'No valid post id was specified.')
-    data = await request.json()
-    callsign = decode_token(data)
-    if not (await get_user_data(callsign))['email_CONFirmed']:
-        return web.HTTPUnauthorized(text='Email is not CONFirmed')
-    if not isinstance(callsign, str):
-        return callsign
+        raise web.HTTPBadRequest(text='No valid post id was specified.')
     await DB.execute("""
         delete from blog_reactions
         where entry_id = %(entryId)s and "user" = %(callsign)s""",
-        {'entryId': entryId, 'callsign': callsign})
+        {'entryId': entry_id, 'callsign': callsign})
     return web.Response(text='OK')
 
+@APP_ROUTES.get('/aiohttp/blog/{entry_id}/comments')
 async def get_blog_comments_handler(request):
     entry_id = int(request.match_info.get('entry_id', None))
     if not entry_id:
-        return web.HTTPBadRequest(text = 'No valid post id was specified.')
+        raise web.HTTPBadRequest(text = 'No valid post id was specified.')
     data = await DB.execute("""
         select id, "user", txt,
             to_char(timestamp_created, 'DD Mon YYYY HH24:MI') as comment_datetime,
@@ -1061,26 +902,19 @@ async def get_blog_comments_handler(request):
         from blog_comments join users on blog_comments.user = users.callsign
         where entry_id = %(entryId)s
         order by id""",
-        {"entryId": entry_id}, 
+        {"entryId": entry_id},
         container="list")
     if not data:
-        return web.HTTPNotFound(text='Blog comments not found')
+        raise web.HTTPNotFound(text='Blog comments not found')
     return web.json_response(data)
 
-async def create_blog_entry_handler(request):
-    data = None
-    if 'multipart/form-data;' in request.headers[aiohttp.hdrs.CONTENT_TYPE]:
-        data = await read_multipart(request)
-    else:
-        data = await request.json()
-    callsign = decode_token(data)
-    if not (await get_user_data(callsign))['email_CONFirmed']:
-        return web.HTTPUnauthorized(text='Email is not CONFirmed')
-    if not isinstance(callsign, str):
-        return callsign
-    station_path = await get_station_path_by_admin_cS(callsign)
+@APP_ROUTES.post('/aiohttp/blog')
+@APP_ROUTES.post('/aiohttp/gallery')
+@auth(require_email_confirmed=True)
+async def create_blog_entry_handler(data, *, callsign, **_):
+    station_path = await get_station_path_by_admin_cs(callsign)
     gallery_path = station_path + '/gallery'
-    file = file_type = file_thumb = media_width = None
+    file = file_type = file_thumb = None
     if 'file' in data:
         post_id = uuid.uuid4().hex
         if data['file']:
@@ -1106,7 +940,8 @@ async def create_blog_entry_handler(request):
                         .run()
                 )
                 video_props = ffmpeg.probe(file_path)
-                video_stream = [stream for stream in video_props['streams'] if stream['codec_type'] == 'video'][0]
+                video_stream = [stream for stream in video_props['streams']
+                        if stream['codec_type'] == 'video'][0]
                 max_video_height = int(CONF['gallery']['max_video_height'])
                 if video_stream['height'] > max_video_height:
                     tmp_file_path = f"{gallery_path}/{file_name_base}_tmp.{file_ext}"
@@ -1158,7 +993,7 @@ async def create_blog_entry_handler(request):
                             img.save(filename=file_path)
             if file_type == 'video':
                 os.unlink(tn_src)
-            
+
             file = f'gallery/{file_name}'
             file_thumb = f'gallery/{file_name_base}_thumb.jpeg'
 
@@ -1168,9 +1003,9 @@ async def create_blog_entry_handler(request):
             values
                 (%(callsign)s, %(file)s, %(fileType)s, %(fileThumb)s, %(text)s)
             """,
-            params={'callsign': callsign, 'file': file, 'fileType': file_type, 
+            params={'callsign': callsign, 'file': file, 'fileType': file_type,
                 'fileThumb': file_thumb, 'text': data['caption']})
- 
+
         if file:
             max_count = int(CONF['gallery']['max_count'])
             excess = await DB.execute("""
@@ -1198,12 +1033,8 @@ async def delete_blog_entry(entry, station_path):
         where id = %(id)s""", entry)
 
 async def export_adif_handler(request):
-    callsign = request.match_info.get('callsign', None)
-    if callsign:
-        callsign = callsign.replace('-', '/')
-    else:
-        return web.HTTPBadRequest(text = 'No callsign was specified.')
-    log = await log_from_dB(callsign, limit=False)
+    callsign = extract_callsign(request)
+    log = await log_from_db(callsign, limit=False)
 
     adif = """ADIF Export from TNXLOG
     Logs generated @ """ + time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()) + "\n<EOH>\n"
@@ -1217,9 +1048,9 @@ async def export_adif_handler(request):
         try:
             adif += (
                     adif_field("CALL", qso['cs']) +
-                    adif_field("QSO_DATE", time.strftime("%Y%m%d", qsoTime)) +
+                    adif_field("QSO_DATE", time.strftime("%Y%m%d", qso_time)) +
                     adif_field("TIME_OFF", time.strftime("%H%M%S", qso_time)) +
-                    adifField("TIME_ON", time.strftime("%H%M%S", qso_time)) +
+                    adif_field("TIME_ON", time.strftime("%H%M%S", qso_time)) +
                     adif_field("BAND", BANDS_WL[qso['band']]) +
                     adif_field("STATION_CALLSIGN", qso['myCS']) +
                     adif_field("FREQ", str(Decimal(qso['freq'])/1000)) +
@@ -1300,7 +1131,7 @@ async def active_users_handler(data, *, callsign, **_):
     station = data['station'] if 'station' in data else None
     if station:
         station_path = get_station_path(data['station'])
-        station_settings = load_jSON(station_path + '/settings.json')
+        station_settings = loadJSON(station_path + '/settings.json')
         if not station_settings:
             return web.HTTPBadRequest(text = 'This station was deleted or moved')
     au_path = WEB_ROOT + '/js/activeUsers.json'
@@ -1321,37 +1152,11 @@ async def active_users_handler(data, *, callsign, **_):
         json.dump(au_data, f_au, ensure_ascii = False)
     return web.Response(text = 'OK')
 
-async def read_multipart(request):
-    data = {}
-    reader = await request.multipart()
-    while True:
-        field = await reader.next()
-        if not field:
-            break
-        contents = await field.read()
-        if field.filename:
-            data[field.name] = {\
-                'contents': contents,\
-                'name': field.filename,
-                'type': field.headers[aiohttp.hdrs.CONTENT_TYPE]}
-        else:
-            data[field.name] = contents.decode('utf-8')
-            if data[field.name] == 'null':
-                data[field.name] = None
-    return data
 
-async def sound_record_handler(request):
-    data = None
-    if 'multipart/form-data;' in request.headers[aiohttp.hdrs.CONTENT_TYPE]:
-        data = await read_multipart(request)
-    else:
-        data = await request.json()
-    callsign = decode_token(data)
-    if not (await get_user_data(callsign))['email_CONFirmed']:
-        return web.HTTPUnauthorized(text='Email is not CONFirmed')
-    if not isinstance(callsign, str):
-        return callsign
-    station_path = await get_station_path_by_admin_cS(callsign)
+@APP_ROUTES.post('/aiohttp/soundRecord')
+@auth(require_email_confirmed=True)
+async def sound_record_handler(data, *, callsign, **_):
+    station_path = await get_station_path_by_admin_cs(callsign)
     sound_records_path = station_path + '/sound'
     if not os.path.isdir(sound_records_path):
         os.mkdir(sound_records_path)
@@ -1361,18 +1166,18 @@ async def sound_record_handler(request):
     with open(file_path, 'wb') as f_sound:
         f_sound.write(file)
     sound_records_data_path = station_path + '/sound.json'
-    sound_records_data = load_jSON(sound_records_data_path)
+    sound_records_data = loadJSON(sound_records_data_path)
     if not sound_records_data:
         sound_records_data = []
     sound_records_data.append(file_name)
-    with open(sound_records_data_path, 'w') as f_sRData:
-        json.dump(sound_records_data, f_sRData, ensure_ascii = False)
+    with open(sound_records_data_path, 'w') as f_sr_data:
+        json.dump(sound_records_data, f_sr_data, ensure_ascii = False)
     return web.Response(text='oK')
 
-@aPP_ROUTES.post('/aiohttp/track')
-@auth(require_email_CONFirmed=true)
+@APP_ROUTES.post('/aiohttp/track')
+@auth(require_email_confirmed=True)
 async def track_handler(data, *, callsign, **_):
-    station_path = await get_station_path_by_admin_cS(callsign)
+    station_path = await get_station_path_by_admin_cs(callsign)
     track_json_path = station_path + '/track.json'
     track_json = {'version': time.time(), 'file': 'track.xml'}
     if 'file' in data:
@@ -1393,12 +1198,12 @@ async def track_handler(data, *, callsign, **_):
         os.remove(track_json_path)
     return web.Response(text = 'OK')
 
-async def log_from_dB(callsign, limit=True):
+async def log_from_db(callsign, limit=True):
     log = []
     limit_clause = f" limit{CONF['web'].getint('log_page_length')}" if limit else ''
     data = await DB.execute(
-        f"""select id, qso from log 
-            where callsign = %(cs)s order by id desc 
+        f"""select id, qso from log
+            where callsign = %(cs)s order by id desc
             {limit_clause}
         """, {'cs': callsign})
     if data:
@@ -1414,18 +1219,21 @@ async def db_insert_qso(callsign, qso):
         values (%(callsign)s, %(qso)s)""",
         {'callsign': callsign, 'qso': json.dumps(qso)})
     if not insert_success:
-        qso_in_dB = await DB.execute("""
+        qso_in_db = await DB.execute("""
             select qso from log
             where callsign = %(callsign)s and (qso->>'cs') = %(cs)s and 
                 (qso->>'qso_ts') = %(qso_ts)s and (qso->>'band') = %(band)s""",
-            {'callsign': callsign, 'qso_ts': str(qso['qso_ts']), 'cs': qso['cs'], 'band': qso['band']})
-        if qso_in_dB:
-            return qso_in_dB.get('ts')
+            {'callsign': callsign,
+                'qso_ts': str(qso['qso_ts']),
+                'cs': qso['cs'],
+                'band': qso['band']})
+        if qso_in_db:
+            return qso_in_db.get('ts')
 
 @APP_ROUTES.post('/aiohttp/log')
-@auth(require_email_CONFirmed=True)
+@auth(require_email_confirmed=True)
 async def log_handler(data, *, callsign, **_):
-    station_path = await get_station_path_by_admin_cS(callsign)
+    station_path = await get_station_path_by_admin_cs(callsign)
     log_path = station_path + '/log.json'
     log = []
     if not os.path.isfile(log_path):
@@ -1436,7 +1244,7 @@ async def log_handler(data, *, callsign, **_):
     except Exception as ex:
         logging.error("Error loading qso log %s", log_path)
         logging.exception(ex)
-        log = await log_from_dB(callsign)
+        log = await log_from_db(callsign)
 
     if 'qso' in data:
 
@@ -1445,7 +1253,7 @@ async def log_handler(data, *, callsign, **_):
         async def process_qso(qso):
             try:
                 dtime = datetime.strptime(qso['ts'], "%Y-%m-%d %H:%M:%S")
-                qso['date'], qso['time'] = dt_fmt(dtime)
+                qso['date'], qso['time'] = dtFmt(dtime)
                 qso['qso_ts'] = (dtime - datetime(1970, 1, 1)) / timedelta(seconds=1)
             except (ValueError, TypeError) as exc:
                 logging.error("Error parsing qso timestamp %s", qso['ts'])
@@ -1491,7 +1299,7 @@ async def log_handler(data, *, callsign, **_):
                 if new_qso:
                     status_path = station_path + '/status.json'
                     status_data = loadJSON(status_path)
-                    _ts = dtime.timestamp() + tz_offset()
+                    _ts = dtime.timestamp() + tzOffset()
                     if ('freq' not in status_data or status_data['freq']['ts'] < _ts):
                         status_data['freq'] = {'value': qso['freq'], 'ts': _ts}
                         with open(status_path, 'w') as f_status:
@@ -1549,7 +1357,7 @@ async def log_search_handler(request):
     result = []
     cs_filter = "and qso->>'cs' = %(callsign)s" if req_data.get('callsign') else ''
     db_data = await DB.execute(
-        f"""select id, qso from log 
+        f"""select id, qso from log
             where callsign = %(station)s {cs_filter}
             order by id desc""",
             req_data)
@@ -1563,14 +1371,10 @@ async def log_search_handler(request):
 def replace0(val):
     return val.replace("0", "\u00D8")
 
-async def ban_user_handler(request):
-    data = await request.json()
-    callsign = decode_token(data)
-    if not isinstance(callsign, str):
-        return callsign
-    if callsign not in SITE_ADMINS:
-        return web.HTTPUnauthorized(text='You must be logged in as site admin')
-    user_data = await get_user_data(data['user'])
+@APP_ROUTES.post('/aiohttp/banUser')
+@auth(require_admin=True)
+async def ban_user_handler(data, _):
+    user_data = await DB.get_user_data(data['user'])
     if not user_data:
         return web.HTTPNotFound(text='User not found')
     alt_logins = await DB.execute(
@@ -1612,14 +1416,9 @@ async def ban_user_handler(request):
         json.dump(BANLIST, f_bl)
     return web.Response(text='OK')
 
-async def users_list_handler(request):
-    data = await request.json()
-    callsign = decode_token(data)
-    if not isinstance(callsign, str):
-        return callsign
-    if not callsign in SITE_ADMINS:
-        return web.HTTPUnauthorized(\
-            text='You must be logged in as site admin')
+@APP_ROUTES.post('/aiohttp/users')
+@auth(require_admin=True)
+async def users_list_handler(data, _):
     where_clause = 'where email not in %(banned)s'
     params = {'banned': tuple(BANLIST['emails'])}
     if data.get('filter') == 'new':
@@ -1629,7 +1428,7 @@ async def users_list_handler(request):
     elif data.get('filter') == 'banned':
         where_clause = "where email in %(banned)s"
     ulist = await DB.execute(f"""
-        select callsign, email, email_CONFirmed, verified, chat_callsign, name
+        select callsign, email, email_confirmed, verified, chat_callsign, name
             from users {where_clause} 
             order by callsign""", params)
     if not ulist:
@@ -1640,23 +1439,18 @@ async def users_list_handler(request):
         user['banned'] = data.get('filter') == 'banned' or user['email'] in BANLIST['emails']
     return web.json_response(ulist)
 
-async def user_edit_handler(request):
-    data = await request.json()
-    callsign = decode_token(data)
-    if not isinstance(callsign, str):
-        return callsign
-    if not callsign in SITE_ADMINS:
-        return web.HTTPUnauthorized(\
-            text='You must be logged in as site admin')
+@APP_ROUTES.post('/aiohttp/userEdit')
+@auth(require_admin=True)
+async def user_edit_handler(data, _):
     await DB.paramUpdate('users', {'callsign': data['callsign']},
-            spliceParams(data, ['verified', 'email_CONFirmed']))
+            spliceParams(data, ['verified', 'email_confirmed']))
     return web.Response(text = 'OK')
 
 @APP_ROUTES.delete('/aiohttp/chat/')
-@auth(require_email_CONFirmed=True)
+@auth(require_email_confirmed=True)
 async def chat_delete_handler(data, *, callsign, **_):
     station = data['station'] if 'station' in data else None
-    admins = SITE_ADMINS 
+    admins = SITE_ADMINS
     chat_path = None
     if station:
         station_path = get_station_path(data['station'])
@@ -1688,7 +1482,7 @@ async def chat_delete_handler(data, *, callsign, **_):
         json.dump(chat, f_chat, ensure_ascii = False)
 
 @APP_ROUTES.post('/aiohttp/chat')
-@auth(require_email_CONFirmed=True)
+@auth(require_email_confirmed=True)
 async def chat_post_handler(data, *, callsign, **_):
     chat_path = ''
     station = data['station'] if 'station' in data else None
@@ -1721,7 +1515,7 @@ def insert_chat_message(path, msg_data, admin):
             'text': msg_data['text'],
             'cs': msg_data.get('cs') or msg_data['from'],
             'admin': admin, 'ts': time.time()}
-    msg['date'], msg['time'] = dt_fmt(datetime.utcnow())
+    msg['date'], msg['time'] = dtFmt(datetime.utcnow())
     if 'name' in msg_data:
         msg['name'] = msg_data['name']
     chat.insert(0, msg)
@@ -1736,22 +1530,22 @@ def insert_chat_message(path, msg_data, admin):
     with open(path, 'w') as f_chat:
         json.dump(chat, f_chat, ensure_ascii = False)
 
-async def send_spot_handler(request):
-    global last_spot_sent
-    data = await request.json()
+@APP_ROUTES.post('/aioohttp/sendSpot')
+@auth(require_token=False)
+async def send_spot_handler(data, _):
+    global LAST_SPOT_SENT
     now = datetime.now().timestamp()
     response = {'sent': False,
             'secondsLeft': CONF.getint('cluster', 'spotInterval')}
-    if not lastSpotSent or now - lastSpotSent > response['secondsLeft']:
-        lastSpotSent = now
-        protocol = await  clusterProtocol.connect(APP.loop, \
+    if not LAST_SPOT_SENT or now - LAST_SPOT_SENT > response['secondsLeft']:
+        LAST_SPOT_SENT = now
+        protocol = await  clusterProtocol.connect(APP.loop,
             call = data['userCS'],
             host = CONF.get('cluster', 'host'),
             port = CONF.get('cluster', 'port'))
 
         def send_spot():
-            protocol.write('dx ' + data['cs'] + ' ' + data['freq'] + ' ' + \
-                data['info'])
+            protocol.write(f"dx {data['cs']} {data['freq']} {data['info']}")
             response['sent'] = True
             APP.loop.call_later(1, protocol.close)
 
@@ -1762,49 +1556,12 @@ async def send_spot_handler(request):
             if not response['sent']:
                 response['reply'] = protocol.latestReply
     else:
-        response['secondsLeft'] -= now - lastSpotSent
+        response['secondsLeft'] -= now - LAST_SPOT_SENT
     return web.json_response(response)
 
-
 def server_start():
-    APP.router.add_post('/aiohttp/CONFirmEmailRequest',
-            CONFirm_email_request_handler)
-    APP.router.add_get('/aiohttp/CONFirmEmail',
-            CONFirm_email_link_handler)
-
-    APP.router.add_post('/aiohttp/contact', contact_handler)
-    APP.router.add_post('/aiohttp/user_data', user_data_handler)
-    APP.router.add_post('/aiohttp/soundRecord', sound_record_handler)
-    APP.router.add_post('/aiohttp/sendSpot', send_spot_handler)
-    APP.router.add_post('/aiohttp/privateMessages/post', private_messages_post_handler)
-    APP.router.add_post('/aiohttp/privateMessages/get', private_messages_get_handler)
-    APP.router.add_post('/aiohttp/privateMessages/delete', private_messages_delete_handler)
-    APP.router.add_post('/aiohttp/privateMessages/read', private_messages_read_handler)
-    APP.router.add_post('/aiohttp/banUser', ban_user_handler)
-    APP.router.add_post('/aiohttp/users', users_list_handler)
-    APP.router.add_post('/aiohttp/editUser', user_edit_handler)
-
-    APP.router.add_get('/aiohttp/adif/{callsign}', export_adif_handler)
-
-    APP.router.add_get('/aiohttp/blog/{callsign}', get_blog_entries_handler)
-    APP.router.add_post('/aiohttp/blog', create_blog_entry_handler)
-    APP.router.add_post('/aiohttp/gallery', create_blog_entry_handler)
-    APP.router.add_delete('/aiohttp/blog/{entry_id}', delete_blog_entry_handler)
-    APP.router.add_post('/aiohttp/blog/clear', clear_blog_handler)
-
-    APP.router.add_get('/aiohttp/blog/{entry_id}/comments', get_blog_comments_handler)
-    APP.router.add_post('/aiohttp/blog/{entry_id}/comments', create_blog_comment_handler)
-    APP.router.add_delete('/aiohttp/blog/comments/{comment_id}', delete_blog_comment_handler)
-
-    APP.router.add_post('/aiohttp/blog/{entry_id}/reactions/{type}', get_blog_reaction_handler)
-    APP.router.add_put('/aiohttp/blog/{entry_id}/reactions', create_blog_reaction_handler)
-    APP.router.add_delete('/aiohttp/blog/{entry_id}/reactions', delete_blog_reaction_handler)
-
-    APP.router.add_post('/aiohttp/blog/{callsign}/comments/read', get_blog_comments_read_handler)
-    APP.router.add_put('/aiohttp/blog/{entry_id}/comments/read', set_blog_comments_read_handler)
-
-
     APP.add_routes(APP_ROUTES)
+    APP.add_routes(STATION_USER_BAN_ROUTES)
 
     DB.verbose = True
 

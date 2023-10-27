@@ -18,11 +18,8 @@ def siteConf():
     conf.read( appRoot + '/site.conf' )
     return conf
 
-def readConf( file ):
-    conf = configparser.ConfigParser()
-    conf.read( appRoot + '/' + file )
-    return conf
-
+CONF = siteConf()
+WEB_ROOT = CONF.get('web', 'root')
 
 def jsonEncodeExtra( obj ):
     if isinstance( obj, decimal.Decimal ):

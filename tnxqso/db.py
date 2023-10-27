@@ -1,0 +1,172 @@
+#!/usr/bin/python3
+#coding=utf-8
+
+import logging
+import traceback
+import json
+import asyncio
+
+import psycopg2
+import aiopg
+
+from common import CONF
+
+async def to_dict(cur, container=None, key_column='id'):
+    if cur and cur.rowcount:
+        col_names = [col.name for col in cur.description]
+        if cur.rowcount == 1 and not container:
+            data = await cur.fetchone()
+            return dict(zip(col_names, data))
+        else:
+            data = await cur.fetchall()
+            if key_column and (key_column in col_names) and container == 'dict':
+                id_idx = col_names.index(key_column)
+                return {row[ id_idx ]: dict(zip(col_names, row)) for row in data}
+            else:
+                return [dict(zip(col_names, row)) for row in data]
+    else:
+        return False
+
+def param_str(params, delim):
+    return delim.join([f"{x} = %({x})s" for x in params.keys()])
+
+def splice_params(data, params):
+    return {param: json.dumps(data[param])
+            if isinstance(data[param],dict) else data[param]
+        for param in params
+        if param in data}
+
+async def init_connection(cn):
+    logging.debug('new db connection')
+
+class DBConn:
+
+    def __init__(self, db_params):
+        self.dsn = ' '.join([f"{k}='{v}'" for k, v in db_params])
+        self.verbose = False
+
+    async def connect(self):
+        try:
+            self.pool = await aiopg.create_pool(self.dsn, maxsize=3,
+                    on_connect = init_connection)
+            logging.debug('db connections pool is created')
+        except:
+            logging.exception('Error creating connection pool')
+            logging.error(self.dsn)
+
+    async def disconnect(self):
+        self.pool.close()
+        logging.debug('closing db connections pool')
+        await self.pool.wait_closed()
+        logging.debug('db connections pool was closed')
+
+    async def fetch(self, sql, params=None):
+        res = False
+        cur = await self.execute(sql, params)
+        if cur.rowcount:
+            res = await cur.fetchall()
+        return res
+
+    async def param_update(self, table, id_params, upd_params):
+        return await self.execute(f"""
+                update {table}
+                set {param_str(upd_params, ', ')}
+                where {param_str(id_params, ' and ')}""",
+                dict(id_params, **upd_params))
+
+    async def param_delete(self, table, id_params):
+        return await self.execute(f"""
+                delete from {table}
+                where {param_str(id_params, ' and ')}""",
+                id_params)
+
+    async def param_upsert(self, table, id_params, upd_params):
+        lookup = await self.get_object(table, id_params, False, True)
+        r = None
+        if lookup:
+            r = await self.param_update(table, id_params, upd_params)
+        else:
+            r = await self.get_object(table, dict(id_params, **upd_params),
+                    True)
+        return r
+
+    async def execute(self, sql, params=none, container=None, key_column=None):
+        res = False
+        with (await self.pool.cursor()) as cur:
+            try:
+                if self.verbose:
+                    logging.debug(sql)
+                    logging.debug(params)
+                await cur.execute(sql, params)                                
+                res = await to_dict(cur, container, key_column) if cur.description is not None else True
+            except Exception as e:
+                logging.exception("Error executing: %s", sql)
+                stack = traceback.extract_stack()
+                logging.error(stack)
+                if params:
+                    logging.error("Params: %s", params)
+                if hasattr(e, 'pgerror'):
+                    logging.error(e.pgerror)
+                    self.error = e.pgerror
+        return res
+
+    async def get_user_data(self, callsign):
+        user_data = await self.get_object('users', {'callsign': callsign}, False, True)
+        banned_by = await self.execute("""
+            select array_agg(admin_callsign) as admins 
+            from user_bans join users on banned_callsign = callsign
+            where email = (select email from users as u1 where u1.callsign = %(callsign)s);
+            """, {'callsign': callsign})
+        if banned_by:
+            user_data['banned_by'] = banned_by['admins']
+        return user_data
+
+
+    async def get_value(self, sql, params = None):
+        res = await self.fetch(sql, params)
+        if res:
+            return res[0][0]
+        else:
+            return False
+
+    async def get_object(self, table, params, create=False, never_create=False):
+        sql = ''
+        res = False
+        if not create:
+            where_clause = " and ".join([f"{k} %({k})s"
+                        if params[k] != None 
+                        else f"{k} is null"
+                        for k in params.keys()])
+            sql = f"""
+                select * from {table} 
+                where {where_clause}"""
+            res = await self.execute(sql, params)
+        if create or (not res and not never_create):
+            keys = params.keys()
+            sql = f"""
+                insert into {table} 
+                ({", ".join(keys)})
+                values ({param_str(keys, ', ')})
+                returning *"""
+            logging.debug('creating object in db')
+            res = await self.execute(sql, params)
+        return res 
+
+    async def update_object( self, table, params, id_param = "id" ):
+        param_string = ", ".join( [ k + " = %(" + k + ")s" 
+            for k in params.keys() if k != id_param ] )
+        if param_string != '':
+            sql = "update " + table + " set " + param_string + \
+                " where " + id_param + " = %(" + id_param + ")s returning *" 
+            with ( await self.execute( sql, params ) ) as cur:
+                if cur:
+                    obj_res = await to_ddict( cur )
+                    return obj_res
+    
+    async def delete_object( self, table, id ):
+        sql = "delete from " + table + " where id = %s" 
+        await self.execute( sql, ( id, ) )
+
+
+DB = DBConn(CONF.items('db'))
+
