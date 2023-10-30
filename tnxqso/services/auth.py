@@ -27,6 +27,22 @@ if not SECRET:
     with open(fp_secret, 'wb') as f_secret:
         f_secret.write(SECRET)
 
+async def check_recaptcha(response):
+    try:
+        rc_data = {'secret': CONF.get('recaptcha', 'secret'), 'response': response}
+        async with aiohttp.ClientSession() as session:
+            resp = await session.post(CONF.get('recaptcha', 'verifyURL'), data = rc_data)
+            resp_data = await resp.json()
+            return resp_data['success']
+    except Exception:
+        logging.exception('Recaptcha error')
+        return False
+
+def extract_callsign(request):
+    callsign = request.match_info.get('callsign', None)
+    if not callsign:
+        raise web.HTTPBadRequest(text = 'No callsign was specified.')
+    return callsign.replace('-', '/')
 
 def decode_token(token, *, require_email=False):
     callsign = email = None

@@ -9,6 +9,7 @@ from functools import partial
 
 from passlib.apache import HtpasswdFile
 import simplejson as json
+from aiohttp import web
 
 appRoot = path.dirname( path.abspath( __file__ ) ) 
 
@@ -20,6 +21,8 @@ def siteConf():
 
 CONF = siteConf()
 WEB_ROOT = CONF.get('web', 'root')
+WEB_ADDRESS = CONF.get('web', 'address')
+
 
 def jsonEncodeExtra( obj ):
     if isinstance( obj, decimal.Decimal ):
@@ -27,8 +30,6 @@ def jsonEncodeExtra( obj ):
     elif isinstance(obj, (date, datetime)):
         return dtFmt(obj)
     raise TypeError( repr( obj ) + " is not JSON serializable" )
-
-json_dumps = partial(json.dumps, default=jsonEncodeExtra)
 
 def loadJSON( pathJS ):
     if not path.isfile( pathJS ):
@@ -41,6 +42,11 @@ def loadJSON( pathJS ):
         logging.error( "Error loading " + pathJS )
         logging.exception( ex )
         return False
+
+DEF_USER_SETTINGS = loadJSON(WEB_ROOT + '/js/defaultUserSettings.json') or {}
+
+json_dumps = partial(json.dumps, default=jsonEncodeExtra)
+web_json_response = partial(web.json_response, dumps=json_dumps)
 
 def startLogging( type, level = logging.DEBUG ):
     conf = siteConf()
