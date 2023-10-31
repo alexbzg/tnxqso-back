@@ -16,18 +16,28 @@ from tnxqso.services.station_dir import (get_station_path, save_station_settings
 
 STATION_SETTINGS_ROUTES = web.RouteTableDef()
 
-@STATION_SETTINGS_ROUTES.post('/aiohttp/stationUserBan')
+async def check_station_chat_admin(station_admin, callsign):
+    station_chat_admins = (await DB.get_user_data(station_admin)
+            )['settings'].get('chatAdmins', [])
+    if callsign not in station_chat_admins:
+        raise web.HTTPUnauthorized(text="Permission denied")
+
+@STATION_SETTINGS_ROUTES.post('/aiohttp/station/banUser')
 @auth()
-async def station_user_post_delete_handler(data, *, callsign, _):
+async def station_user_ban_post_handler(data, *, callsign, **_):
+    if callsign != data['stationAdmin']:
+        await check_station_chat_admin(data['stationAdmin'], callsign)
     await DB.execute("""
         insert into user_bans (admin_callsign, banned_callsign)
-        values (%(admin)s, %(banned)s
+        values (%(admin)s, %(banned)s)
         """, {'admin': callsign, 'banned': data['banned']})
     return web.Response(text = 'OK')
 
-@STATION_SETTINGS_ROUTES.delete('/aiohttp/stationUserBan')
+@STATION_SETTINGS_ROUTES.delete('/aiohttp/station/banUser')
 @auth()
-async def station_user_ban_delete_handler(data, *, callsign, _):
+async def station_user_ban_delete_handler(data, *, callsign, **_):
+    if callsign != data['stationAdmin']:
+        await check_station_chat_admin(data['stationAdmin'], callsign)
     await DB.execute("""
         delete from user_bans
         where admin_callsign = %(admin)s and  banned_callsign = %(banned)s

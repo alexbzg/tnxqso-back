@@ -15,7 +15,7 @@ CHAT_ROUTES = web.RouteTableDef()
 def replace0(val):
     return val.replace("0", "\u00D8")
 
-@CHAT_ROUTES.delete('/aiohttp/chat/')
+@CHAT_ROUTES.delete('/aiohttp/chat')
 @auth(require_email_confirmed=True)
 async def chat_delete_handler(data, *, callsign, **_):
     station = data['station'] if 'station' in data else None
@@ -24,8 +24,10 @@ async def chat_delete_handler(data, *, callsign, **_):
     if station:
         station_path = get_station_path(data['station'])
         station_settings = loadJSON(station_path + '/settings.json')
-        admins += [x.lower() for x in\
-            station_settings['chatAdmins'] + [ station_settings['admin'], ]]
+        admins = set(admins)
+        admins.update([x.lower() for x in\
+            station_settings['chatAdmins'] + 
+            [station_settings['admin']]])
         chat_path = station_path + '/chat.json'
     else:
         chat_path = WEB_ROOT + '/js/talks.json'
@@ -49,6 +51,7 @@ async def chat_delete_handler(data, *, callsign, **_):
             chat = [m for m in chat if m['admin'] and m['text'].startswith('***')]
     with open(chat_path, 'w') as f_chat:
         json.dump(chat, f_chat, ensure_ascii = False)
+    return web.Response(text = 'OK')
 
 @CHAT_ROUTES.post('/aiohttp/chat')
 @auth(require_email_confirmed=True)

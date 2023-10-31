@@ -37,7 +37,7 @@ async def publish_handler(data, _):
 
 @ADMIN_ROUTES.post('/aiohttp/banUser')
 @auth(require_admin=True)
-async def ban_user_handler(data, _):
+async def ban_user_handler(data, **_):
     user_data = await DB.get_user_data(data['user'])
     if not user_data:
         return web.HTTPNotFound(text='User not found')

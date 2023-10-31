@@ -9,9 +9,9 @@ import pytest
 
 from tnxqso.common import WEB_ADDRESS
 
-SPOT_CALLSIGN = "R1CF/M"
+SPOT_CALLSIGN = "R1AV"
 USER_CALLSIGN = "R7CL"
-FREQ = "7080,0"
+FREQ = "14074,0"
 
 @pytest.mark.asyncio
 async def test_valid_requests():

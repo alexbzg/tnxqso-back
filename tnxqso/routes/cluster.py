@@ -12,6 +12,9 @@ from tnxqso.services.auth import auth
 
 CLUSTER_ROUTES = web.RouteTableDef()
 RETRIES_LIMIT = 3
+CONNECT_TIMEOUT = 0.5
+LOGIN_TIMEOUT = 2
+CLOSE_DELAY = 1
 
 @CLUSTER_ROUTES.post('/aiohttp/sendSpot')
 @auth(require_token=False)
@@ -25,11 +28,10 @@ async def send_spot_handler(data, *, request, **_):
         last_reply = ''
         while retries < RETRIES_LIMIT:
             try:
-                fut_connection = asyncio.open_connection(
+                reader, writer = await asyncio.wait_for(asyncio.open_connection(
                         CONF.get('cluster', 'host'),
-                        CONF.get('cluster', 'port'))
-                reader, writer = await asyncio.wait_for(fut_connection,
-                        timeout=0.5)
+                        CONF.get('cluster', 'port')),
+                        timeout=CONNECT_TIMEOUT)
 
                 def write(cmd):
                     writer.write(f"{cmd}\n".encode())
@@ -50,11 +52,11 @@ async def send_spot_handler(data, *, request, **_):
                             elif '>' in cluster_reply:
                                 logged_in = True
 
-                await asyncio.wait_for(login(), timeout=2)
+                await asyncio.wait_for(login(), timeout=LOGIN_TIMEOUT)
 
                 write(f"dx {data['cs']} {data['freq']} {data['info']}")
                 response['sent'] = True
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(CLOSE_DELAY)
                 request.app['tnxqso-last-spot-sent'][data['cs']] = time.time()
                 break
             except (OSError, asyncio.TimeoutError) as exc:

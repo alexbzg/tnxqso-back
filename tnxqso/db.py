@@ -118,13 +118,11 @@ class DBConn:
     async def get_user_data(self, callsign):
         user_data = await self.get_object('users', {'callsign': callsign}, False, True)
         if user_data:
-            banned_by = await self.execute("""
+            user_data['banned_by'] = (await self.execute("""
                 select array_agg(admin_callsign) as admins 
                 from user_bans join users on banned_callsign = callsign
                 where email = (select email from users as u1 where u1.callsign = %(callsign)s);
-                """, {'callsign': callsign})
-            if banned_by:
-                user_data['banned_by'] = banned_by['admins']
+                """, {'callsign': callsign})).get('admins', [])
         return user_data
 
     async def get_value(self, sql, params = None):
