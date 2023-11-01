@@ -8,7 +8,7 @@ import io
 
 from aiohttp import web
 
-from tnxqso.services.auth import auth
+from tnxqso.services.auth import auth, extract_callsign
 from tnxqso.db import DB, splice_params
 from tnxqso.common import WEB_ROOT, loadJSON
 from tnxqso.services.station_dir import (get_station_path, save_station_settings,
@@ -22,7 +22,7 @@ async def check_station_chat_admin(station_admin, callsign):
     if callsign not in station_chat_admins:
         raise web.HTTPUnauthorized(text="Permission denied")
 
-@STATION_SETTINGS_ROUTES.post('/aiohttp/station/banUser')
+@STATION_SETTINGS_ROUTES.post('/aiohttp/station/banlist')
 @auth()
 async def station_user_ban_post_handler(data, *, callsign, **_):
     if callsign != data['stationAdmin']:
@@ -30,10 +30,10 @@ async def station_user_ban_post_handler(data, *, callsign, **_):
     await DB.execute("""
         insert into user_bans (admin_callsign, banned_callsign)
         values (%(admin)s, %(banned)s)
-        """, {'admin': callsign, 'banned': data['banned']})
+        """, {'admin': data['stationAdmin'], 'banned': data['banned']})
     return web.Response(text = 'OK')
 
-@STATION_SETTINGS_ROUTES.delete('/aiohttp/station/banUser')
+@STATION_SETTINGS_ROUTES.delete('/aiohttp/station/banlist')
 @auth()
 async def station_user_ban_delete_handler(data, *, callsign, **_):
     if callsign != data['stationAdmin']:
@@ -41,10 +41,21 @@ async def station_user_ban_delete_handler(data, *, callsign, **_):
     await DB.execute("""
         delete from user_bans
         where admin_callsign = %(admin)s and  banned_callsign = %(banned)s
-        """, {'admin': callsign, 'banned': data['banned']})
+        """, {'admin': data['stationAdmin'], 'banned': data['banned']})
     return web.Response(text = 'OK')
 
-@STATION_SETTINGS_ROUTES.post('/aiohttp/userSettings')
+@STATION_SETTINGS_ROUTES.get('/aiohttp/station/{callsign}/banlist')
+async def station_user_ban_list_handler(request):
+    admin_callsign = extract_callsign(request)
+    rsp_data = (await DB.execute("""
+        select users.callsign, chat_callsign 
+        from user_bans join users on banned_callsign = users.callsign
+        where admin_callsign = %(admin_callsign)s
+        """, {'admin_callsign': admin_callsign},
+        container="list")) or []
+    return web.json_response(rsp_data)
+
+@STATION_SETTINGS_ROUTES.post('/aiohttp/station/settings')
 @auth(require_email_confirmed=True)
 async def user_settings_handler(data, *, callsign, **_):
     if 'settings' in data:
@@ -118,7 +129,7 @@ async def user_settings_handler(data, *, callsign, **_):
             splice_params(data, ('email', 'password', 'name', 'chat_callsign', 'pm_enabled')))
     return web.Response(text = 'OK')
 
-@STATION_SETTINGS_ROUTES.post('/aiohttp/track')
+@STATION_SETTINGS_ROUTES.post('/aiohttp/station/track')
 @auth(require_email_confirmed=True)
 async def track_handler(data, *, callsign, **_):
     station_path = await get_station_path_by_admin_cs(callsign)
