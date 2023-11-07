@@ -144,11 +144,12 @@ class DBConn:
                 where {where_clause}"""
             res = await self.execute(sql, params)
         if create or (not res and not never_create):
-            keys = params.keys()
+            keys = ", ".join(params.keys())
+            values = ", ".join([f"%({key})s" for key in params.keys()])
             sql = f"""
                 insert into {table} 
-                ({", ".join(keys)})
-                values ({param_str(keys, ', ')})
+                ({keys})
+                values ({values})
                 returning *"""
             logging.debug('creating object in db')
             res = await self.execute(sql, params)

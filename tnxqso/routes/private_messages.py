@@ -13,7 +13,7 @@ PM_ROUTES = web.RouteTableDef()
 
 @PM_ROUTES.post('/aiohttp/privateMessages/post')
 @auth(require_email_confirmed=True)
-async def private_messages_post_handler(data, *, _callsign, **_):
+async def private_messages_post_handler(data, **_):
     receiver = await DB.get_user_data(data['callsign_to'])
     if not receiver or not receiver['pm_enabled']:
         raise web.HTTPBadRequest(

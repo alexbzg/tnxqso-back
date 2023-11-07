@@ -61,10 +61,10 @@ async def login_handler(request):
         'aud': ['tnxqso', 'rabbitmq'],
         'scope': [
             f'rabbitmq.read:{CONF["rabbitmq"]["virtual_host"]}/pm/{data["login"]}',
-            f'rabbitmq.CONFigure:{CONF["rabbitmq"]["virtual_host"]}/pm/{data["login"]}',
+            f'rabbitmq.configure:{CONF["rabbitmq"]["virtual_host"]}/pm/{data["login"]}',
             f'rabbitmq.read:{CONF["rabbitmq"]["virtual_host"]}/stomp-subscription-*',
             f'rabbitmq.write:{CONF["rabbitmq"]["virtual_host"]}/stomp-subscription-*',
-            f'rabbitmq.CONFigure:{CONF["rabbitmq"]["virtual_host"]}/stomp-subscription-*'
+            f'rabbitmq.configure:{CONF["rabbitmq"]["virtual_host"]}/stomp-subscription-*'
             ]
         }, disable_time=True)
     del user_data['password']
@@ -73,8 +73,6 @@ async def login_handler(request):
     if data['login'] in SITE_ADMINS:
         user_data['siteAdmin'] = True
     return web.json_response(user_data)
-
-
 
 @USER_ROUTES.post('/aiohttp/passwordRecoveryRequest')
 async def password_recovery_request_handler(request):

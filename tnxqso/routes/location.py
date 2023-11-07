@@ -67,7 +67,7 @@ async def wfs_query(wfs_type, location, strict=False):
     try:
         data = ''
         async with httpx.AsyncClient() as client:
-            rsp = await client.get(url.format_map(url_params), verify=False, timeout=(0.2, 1))
+            rsp = await client.get(url.format_map(url_params), timeout=(0.2, 1))
             data = rsp.text
         tag = '<cite:' + params['tag'] + '>'
         result = []
@@ -96,8 +96,8 @@ async def get_qth_data(location, country=None):
     if country == 'RU':
 
         rda = '-----'
-        all_rda = wfs_query('rda', location)
-        strict_rda = wfs_query('rda', location, strict=True)
+        all_rda = await wfs_query('rda', location)
+        strict_rda = await wfs_query('rda', location, strict=True)
         if all_rda:
             if len(all_rda) > 1:
                 all_rda = [strict_rda] + [x for x in all_rda if x != strict_rda or x == '-----']
@@ -112,8 +112,8 @@ async def get_qth_data(location, country=None):
     elif country == 'KZ':
 
         kda = '-----'
-        all_kda = wfs_query('kda', location)
-        strict_kda = wfs_query('kda', location, strict=True)
+        all_kda = await wfs_query('kda', location)
+        strict_kda = await wfs_query('kda', location, strict=True)
         if all_kda:
             if len(all_kda) > 1:
                 all_kda = [strict_kda] + [x for x in all_kda if x != strict_kda or x == '-----']
@@ -123,10 +123,10 @@ async def get_qth_data(location, country=None):
         data['fields']['values'][0] = kda
 
     elif country == 'IT':
-        data['fields']['values'][0] = wfs_query('waip', location, strict=True)
+        data['fields']['values'][0] = await wfs_query('waip', location, strict=True)
 
     elif country == 'GB':
-        data['fields']['values'][0] = wfs_query('wab', location, strict=True)
+        data['fields']['values'][0] = await wfs_query('wab', location, strict=True)
 
     return data
 

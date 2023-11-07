@@ -113,7 +113,7 @@ def auth(require_token=True,
         @wraps(func)
         async def auth_wrapped(request):
             data = None
-            if 'multipart/form-data;' in request.headers[aiohttp.hdrs.CONTENT_TYPE]:
+            if 'multipart/form-data;' in (request.headers.get(aiohttp.hdrs.CONTENT_TYPE) or ''):
                 data = await read_multipart(request)
             else:
                 data = await request.json()
