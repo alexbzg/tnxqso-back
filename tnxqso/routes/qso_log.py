@@ -17,12 +17,13 @@ from tnxqso.services.station_dir import get_station_path_by_admin_cs
 
 QSO_LOG_ROUTES = web.RouteTableDef()
 
-BANDS_WL = {'1.8': '160M', '3.5': '80M', '7': '40M', \
-        '10': '30M', '14': '20M', '20': '14M', '18': '17M', '21': '15M', \
+BANDS_WL = {'1.8': '160M', '3.5': '80M', '7': '40M',
+        '10': '30M', '14': '20M', '20': '14M', '18': '17M', '21': '15M',
         '24': '12M', '28': '10M', '50': '6M', '144': '2M'}
 
 ADIF_QTH_FIELDS = ('MY_CNTY', 'MY_CITY', 'NOTES')
 
+@QSO_LOG_ROUTES.get('/aiohttp/adif/{callsign}')
 async def export_adif_handler(request):
     callsign = extract_callsign(request)
     log = await log_from_db(callsign, limit=False)
@@ -35,8 +36,8 @@ async def export_adif_handler(request):
         return f"<{name.upper()}:{len(data_str)}>{data_str} "
 
     for qso in log:
-        qso_time = time.gmtime(qso['qso_ts'])
         try:
+            qso_time = time.gmtime(qso['qso_ts'])
             adif += (
                     adif_field("CALL", qso['cs']) +
                     adif_field("QSO_DATE", time.strftime("%Y%m%d", qso_time)) +
