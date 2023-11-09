@@ -60,13 +60,6 @@ class DBConn:
         await self.pool.wait_closed()
         logging.debug('db connections pool was closed')
 
-    async def fetch(self, sql, params=None):
-        res = False
-        cur = await self.execute(sql, params)
-        if cur.rowcount:
-            res = await cur.fetchall()
-        return res
-
     async def param_update(self, table, id_params, upd_params):
         return await self.execute(f"""
                 update {table}
@@ -124,12 +117,6 @@ class DBConn:
                 where email = (select email from users as u1 where u1.callsign = %(callsign)s);
                 """, {'callsign': callsign})).get('admins', [])
         return user_data
-
-    async def get_value(self, sql, params = None):
-        res = await self.fetch(sql, params)
-        if res:
-            return res[0][0]
-        return False
 
     async def get_object(self, table, params, create=False, never_create=False):
         sql = ''
