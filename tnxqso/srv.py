@@ -28,7 +28,7 @@ logging.debug("server start")
 APP = web.Application(client_max_size = 200 * 1024 ** 2)
 APP['tnxqso-last-spot-sent'] = defaultdict(int)
 
-def server_start():
+def run():
     APP.add_routes(STATION_SETTINGS_ROUTES)
     APP.add_routes(USER_ROUTES)
     APP.add_routes(ADMIN_ROUTES)

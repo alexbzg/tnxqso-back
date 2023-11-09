@@ -7,7 +7,6 @@ from os import path
 from datetime import datetime, date
 from functools import partial
 
-from passlib.apache import HtpasswdFile
 import simplejson as json
 from aiohttp import web
 
@@ -58,22 +57,6 @@ def startLogging( type, level = logging.DEBUG ):
     loggerHandler.setFormatter( logging.Formatter( \
         '%(asctime)s %(name)-12s %(levelname)-8s %(message)s' ) )
     logger.addHandler( loggerHandler )
-
-def createFtpUser( user, passwd, test = False ):
-    conf = siteConf()
-    testPfx = '_test' if test else ''
-    setFtpPasswd( user, passwd, test )
-    ftpPath = conf.get( 'web', 'root' + testPfx ) + '/ftp/' + user
-    os.makedirs( ftpPath )
-    os.chmod( ftpPath, 0o775 )
-
-def setFtpPasswd( user, passwd, test = False ):
-    conf = siteConf()
-    testPfx = '_test' if test else ''
-    ht = HtpasswdFile( conf.get( 'ftp', 'passwd' + testPfx ), 
-            default_scheme = "md5_crypt" )
-    ht.set_password( user, passwd )
-    ht.save()
 
 def dtFmt( dt ):
     return dt.strftime( '%d %b' ).lower(), dt.strftime( '%H:%Mz' )

@@ -27,6 +27,7 @@ async def send_spot_handler(data, *, request, **_):
         retries = 0
         last_reply = ''
         while retries < RETRIES_LIMIT:
+            reader = writer = None
             try:
                 reader, writer = await asyncio.wait_for(asyncio.open_connection(
                         CONF.get('cluster', 'host'),
@@ -35,12 +36,14 @@ async def send_spot_handler(data, *, request, **_):
 
                 def write(cmd):
                     writer.write(f"{cmd}\n".encode())
+                    logging.debug("cluster in: %s", cmd)
 
                 async def login():
                     nonlocal last_reply
                     logged_in = False
                     while not logged_in:
                         cluster_reply = (await reader.readline()).decode().strip()
+                        logging.debug("cluster out: %s", cluster_reply)
                         if cluster_reply:
                             last_reply = cluster_reply
                             if 'your call:' in cluster_reply:

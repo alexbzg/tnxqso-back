@@ -82,7 +82,7 @@ async def ban_user_handler(data, **_):
 
 @ADMIN_ROUTES.post('/aiohttp/users')
 @auth(require_admin=True)
-async def users_list_handler(data, _):
+async def users_list_handler(data, **_):
     where_clause = 'where email not in %(banned)s'
     params = {'banned': tuple(BANLIST['emails'])}
     if data.get('filter') == 'new':
@@ -103,9 +103,9 @@ async def users_list_handler(data, _):
         user['banned'] = data.get('filter') == 'banned' or user['email'] in BANLIST['emails']
     return web.json_response(ulist)
 
-@ADMIN_ROUTES.post('/aiohttp/userEdit')
+@ADMIN_ROUTES.post('/aiohttp/editUser')
 @auth(require_admin=True)
-async def user_edit_handler(data, _):
+async def user_edit_handler(data, **_):
     await DB.param_update('users', {'callsign': data['callsign']},
             splice_params(data, ['verified', 'email_confirmed']))
     return web.Response(text = 'OK')

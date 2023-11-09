@@ -46,6 +46,7 @@ async def test_valid_requests():
 
 @pytest.mark.asyncio
 async def test_invalid_callsign():
+    await asyncio.sleep(60)
     async with httpx.AsyncClient() as client:
         payload = {
                 "cs": SPOT_CALLSIGN,
