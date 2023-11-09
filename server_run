@@ -1,0 +1,6 @@
+#!/usr/bin/python3
+import sys
+from tnxqso.srv import run
+
+if __name__ == '__main__':
+    sys.exit(run())
