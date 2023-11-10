@@ -13,7 +13,8 @@ from aiohttp import web
 from tnxqso.common import CONF
 from tnxqso.db import DB
 from tnxqso.services.auth import auth, extract_callsign, SITE_ADMINS
-from tnxqso.services.station_dir import get_station_path_by_admin_cs
+from tnxqso.services.station_dir import (get_station_path_by_admin_cs, delete_blog_entry,
+    get_gallery_size)
 
 library.MagickSetCompressionQuality.argtypes = [c_void_p, c_size_t]
 
@@ -303,27 +304,36 @@ async def create_blog_entry_handler(data, *, callsign, **_):
                 'fileThumb': file_thumb, 'text': data['caption']})
 
         if file:
-            max_count = int(CONF['gallery']['max_count'])
-            excess = await DB.execute("""
-                select id, "file", file_thumb
-                from blog_entries
-                where "user" = %(callsign)s and "file" is not null
-                order by id desc
-                offset %(maxCount)s""",
-                params={'callsign': callsign, 'maxCount': max_count},
-                container='list')
-            if excess:
-                for entry in excess:
+            #check gallery size and delete older media if out of quota
+            gallery_size = get_gallery_size(station_path)
+            user_quota = get_user_gallery_quota(callsign)
+            user_quota *= int(CONF['gallery']['quota'])
+            if gallery_size > user_quota:
+                db_media = db_media = DB.execute("""
+                    select id, "file", file_thumb
+                    from blog_entries 
+                    where "user" = %(callsign)s and "file" is not null
+                    order by id""", {'callsign': callsign})
+                for entry in db_media:
+                    file_size = os.path.getsize(f"{station_path}/{entry['file']}")
                     await delete_blog_entry(entry, station_path)
+                    gallery_size -= file_size
+                    if gallery_size <= user_quota:
+                        break
 
         return web.Response(text='OK')
 
-async def delete_blog_entry(entry, station_path):
-    if entry['file']:
-        if os.path.isfile(f"{station_path}/{entry['file']}"):
-            os.unlink(f"{station_path}/{entry['file']}")
-        if os.path.isfile(f"{station_path}/{entry['file_thumb']}"):
-            os.unlink(f"{station_path}/{entry['file_thumb']}")
-    await DB.execute("""
-        delete from blog_entries
-        where id = %(id)s""", entry)
+async def get_user_gallery_quota(callsign):
+    user_coeff = (await DB.execute("""
+        select gallery_quotas
+        from users
+        where callsign = %(callsign)s""", {'callsign': callsign}))['gallery_quotas']
+    return int(CONF['gallery']['quota'])*user_coeff
+
+@BLOG_ROUTES.post('/aiohttp/blog/quota')
+@auth(require_email_confirmed=True)
+async def get_blog_quota_handler(_data, *, callsign, **_):
+    return web.json_response({
+        'quota': await get_user_gallery_quota(callsign),
+        'used': get_gallery_size(await get_station_path_by_admin_cs(callsign))
+        })

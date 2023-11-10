@@ -3,6 +3,7 @@
 
 import json
 import os
+import pathlib
 
 from tnxqso.common import WEB_ROOT, DEF_USER_SETTINGS
 from tnxqso.db import DB
@@ -34,3 +35,21 @@ def create_station_dir(path):
     for key, val in JSON_TEMPLATES.items():
         with open(f'{path}/{key}.json', 'w') as file:
             json.dump(val, file, ensure_ascii = False)
+
+async def delete_blog_entry(entry, station_path):
+    if entry['file']:
+        if os.path.isfile(f"{station_path}/{entry['file']}"):
+            os.unlink(f"{station_path}/{entry['file']}")
+        if os.path.isfile(f"{station_path}/{entry['file_thumb']}"):
+            os.unlink(f"{station_path}/{entry['file_thumb']}")
+    await DB.execute("""
+        delete from blog_entries
+        where id = %(id)s""", entry)
+
+def get_gallery_size(station_path):
+    gallery_path = f"{station_path}/gallery"
+    if not os.path.isdir(gallery_path):
+        return 0
+    return sum(os.path.getsize(str(file_path))
+            for file_path in pathlib.Path(gallery_path).iterdir()
+            if file_path.is_file() and '_thumb' not in file_path.name)
