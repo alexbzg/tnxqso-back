@@ -23,7 +23,7 @@ async def visitors_handler(data, *, callsign, **_):
             'tab': data['tab']})
     return web.Response(text = 'OK')
 
-@VISITORS_ROUTES.post('/aiohttp/visitorsStats')
+@VISITORS_ROUTES.post('/aiohttp/visitors/stats')
 @auth()
 async def visitors_stats_handler(data, *, callsign, **_):
     if callsign not in SITE_ADMINS:
