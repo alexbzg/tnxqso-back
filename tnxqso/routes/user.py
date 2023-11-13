@@ -72,7 +72,7 @@ async def login_handler(request):
         confirm_email_msg(user_data)
     if data['login'] in SITE_ADMINS:
         user_data['siteAdmin'] = True
-    return web.json_response(user_data)
+    return web_json_response(user_data)
 
 @USER_ROUTES.post('/aiohttp/passwordRecoveryRequest')
 async def password_recovery_request_handler(request):
