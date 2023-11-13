@@ -25,7 +25,6 @@ async def get_blog_entries_handler(request):
     callsign = extract_callsign(request)
     data = await DB.execute("""
             select id, "file", file_type, file_thumb, txt, 
-                to_char(timestamp_created, 'Dy, DD Mon YYYY HH24:MI:SS GMT') as last_modified,
                 to_char(timestamp_created, 'DD Mon YYYY HH24:MI') as post_datetime,
                 extract(epoch from timestamp_created) as ts,
                 (select count(*) 
@@ -44,8 +43,18 @@ async def get_blog_entries_handler(request):
             container='list')
     if not data:
         return web.HTTPNotFound(text='Blog entries not found')
+    last_modified = (await DB.execute("""
+        select to_char(greatest(
+            (select timestamp_created 
+            from blog_entries
+            where "user" = callsign
+            order by id desc limit 1), 
+            last_blog_entry_delete),
+            'DD Mon YYYY HH24:MI:SS') as last_modified
+            from users where callsign = %(callsign)s""",
+            {'callsign': callsign}))['last_modified']
 
-    return web.json_response(data, headers={'last-modified': data[0]['last_modified']})
+    return web.json_response(data, headers={'last-modified': last_modified})
 
 @BLOG_ROUTES.post('/aiohttp/blog/{callsign}/comments/read')
 @auth()
@@ -302,24 +311,6 @@ async def create_blog_entry_handler(data, *, callsign, **_):
             """,
             params={'callsign': callsign, 'file': file, 'fileType': file_type,
                 'fileThumb': file_thumb, 'text': data['caption']})
-
-        if file:
-            #check gallery size and delete older media if out of quota
-            gallery_size = get_gallery_size(station_path)
-            user_quota = get_user_gallery_quota(callsign)
-            user_quota *= int(CONF['gallery']['quota'])
-            if gallery_size > user_quota:
-                db_media = db_media = DB.execute("""
-                    select id, "file", file_thumb
-                    from blog_entries 
-                    where "user" = %(callsign)s and "file" is not null
-                    order by id""", {'callsign': callsign})
-                for entry in db_media:
-                    file_size = os.path.getsize(f"{station_path}/{entry['file']}")
-                    await delete_blog_entry(entry, station_path)
-                    gallery_size -= file_size
-                    if gallery_size <= user_quota:
-                        break
 
         return web.Response(text='OK')
 

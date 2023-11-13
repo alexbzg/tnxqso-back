@@ -6,7 +6,7 @@ import json
 
 from aiohttp import web
 
-from tnxqso.common import CONF, WEB_ADDRESS, DEF_USER_SETTINGS
+from tnxqso.common import CONF, WEB_ADDRESS, DEF_USER_SETTINGS, web_json_response
 from tnxqso.db import DB
 from tnxqso.services.auth import (auth, SITE_ADMINS, BANLIST, decode_token, encode_token,
         check_recaptcha, authenticate)
@@ -21,7 +21,7 @@ async def user_data_handler(_data, *, callsign, **_):
     del user_data['password']
     if callsign in SITE_ADMINS:
         user_data['siteAdmin'] = True
-    return web.json_response(user_data)
+    return web_json_response(user_data)
 
 @USER_ROUTES.post('/aiohttp/login')
 async def login_handler(request):
