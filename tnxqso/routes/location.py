@@ -5,6 +5,7 @@ import math
 import time
 import json
 from datetime import datetime, timedelta
+import logging
 
 from aiohttp import web
 import httpx
@@ -81,6 +82,7 @@ async def wfs_query(wfs_type, location, strict=False):
         return None
 
     except httpx.TimeoutException:
+        logging.exception('wfs query timeout: ')
         return ['-----']
 
 async def get_qth_data(location, country=None):
