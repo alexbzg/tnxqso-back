@@ -26,6 +26,7 @@ server_run = "tnxqso.srv:run"
 active_stations = "tnxqso.scripts.active_stations:main"
 clear_stations = "tnxqso.scripts.clear_stations:main"
 cluster_filter = "tnxqso.scripts.cluster_filter:main"
+parse_rafa = "tnxqso.scripts.parse_rafa:main"
 
 [build-system]
 requires = ["poetry-core"]
