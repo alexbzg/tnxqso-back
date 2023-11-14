@@ -76,23 +76,25 @@ async def user_settings_handler(data, *, callsign, **_):
                     os.rename(f"{station_path}/gallery", f"{new_path}/gallery")
                 if station_path and os.path.exists(f"{station_path}/chat.json"):
                     os.rename(f"{station_path}/chat.json", f"{new_path}/chat.json")
-                if station_path and os.path.exists(station_path):
-                    shutil.rmtree(station_path)
-                if station_callsign:
-                    await DB.execute(
-                        "delete from log where callsign = %(callsign)s",
-                        {'callsign': station_callsign})
-                    await DB.execute(
-                        "delete from visitors where station = %(callsign)s",
-                        {'callsign': station_callsign})
-                if station_callsign and station_callsign in publish:
-                    if new_station_callsign:
-                        publish[new_station_callsign] = publish[station_callsign]
-                    del publish[station_callsign]
-                station_callsign = new_station_callsign
-                station_path = new_path
-            else:
-                station_path = None
+            if station_callsign:
+                await DB.execute(
+                    "delete from log where callsign = %(callsign)s",
+                    {'callsign': station_callsign})
+                await DB.execute(
+                    "delete from visitors where station = %(callsign)s",
+                    {'callsign': station_callsign})
+            if station_callsign and station_callsign in publish:
+                if new_station_callsign:
+                    publish[new_station_callsign] = publish[station_callsign]
+                del publish[station_callsign]
+            if station_path and os.path.exists(station_path):
+                shutil.rmtree(station_path)
+            if not new_path:
+                await DB.execute(
+                    'delete from blog_entries where "user" = %(callsign)s',
+                    {'callsign': callsign})
+            station_path = new_path
+            station_callsign = new_station_callsign
         if station_callsign:
             if not station_callsign in publish:
                 publish[station_callsign] = {'admin': True}
