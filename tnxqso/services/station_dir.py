@@ -4,6 +4,7 @@
 import json
 import os
 import pathlib
+import re
 
 from tnxqso.common import WEB_ROOT, DEF_USER_SETTINGS
 from tnxqso.db import DB
@@ -11,8 +12,15 @@ from tnxqso.db import DB
 JSON_TEMPLATES = {'settings': DEF_USER_SETTINGS,
     'log': [], 'chat': [], 'news': [], 'cluster': [], 'status': {} }
 
+RE_STRIP_CALLSIGN = re.compile(r"\d?[a-z]+\d+[a-z]+")
+
+def strip_callsign(callsign):
+    """remove prefixes/suffixes from callsign"""
+    cs_match = RE_STRIP_CALLSIGN.search(callsign)
+    return cs_match.group(0) if cs_match else None
+
 def get_station_path(callsign):
-    return WEB_ROOT + '/stations/' + callsign.lower().replace('/', '-')
+    return f"{WEB_ROOT}/stations/{strip_callsign(callsign.lower())}"
 
 async def get_station_path_by_admin_cs(admin_cs):
     station_cs = await DB.get_station_callsign(admin_cs)
