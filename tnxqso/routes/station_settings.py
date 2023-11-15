@@ -67,19 +67,23 @@ async def user_settings_handler(data, *, callsign, **_):
         new_station_callsign = data['settings']['station']['callsign']
         if station_callsign != new_station_callsign:
             new_path = get_station_path(new_station_callsign) if new_station_callsign else None
-            if new_station_callsign:
-                if os.path.exists(new_path):
-                    return web.HTTPBadRequest(text=
-                        f'Station callsign {new_station_callsign.upper()} is already registered')
-                create_station_dir(new_path)
-                if station_path and os.path.exists(f"{station_path}/gallery"):
-                    os.rename(f"{station_path}/gallery", f"{new_path}/gallery")
-                if station_path and os.path.exists(f"{station_path}/chat.json"):
-                    os.rename(f"{station_path}/chat.json", f"{new_path}/chat.json")
-            if station_callsign:
-                await DB.execute(
-                    "delete from log where callsign = %(callsign)s",
-                    {'callsign': station_callsign})
+            if new_path != station_path:
+                if new_path:
+                    if os.path.exists(new_path):
+                        return web.HTTPBadRequest(text=
+                            f'Station callsign {new_station_callsign.upper()}' +
+                                'is already registered')
+                    create_station_dir(new_path)
+                    if station_path and os.path.exists(f"{station_path}/gallery"):
+                        os.rename(f"{station_path}/gallery", f"{new_path}/gallery")
+                    if station_path and os.path.exists(f"{station_path}/chat.json"):
+                        os.rename(f"{station_path}/chat.json", f"{new_path}/chat.json")
+                else:
+                    await DB.execute(
+                        'delete from blog_entries where "user" = %(callsign)s',
+                        {'callsign': callsign})
+                if station_path and os.path.exists(station_path):
+                    shutil.rmtree(station_path)
                 await DB.execute(
                     "delete from visitors where station = %(callsign)s",
                     {'callsign': station_callsign})
@@ -87,12 +91,6 @@ async def user_settings_handler(data, *, callsign, **_):
                 if new_station_callsign:
                     publish[new_station_callsign] = publish[station_callsign]
                 del publish[station_callsign]
-            if station_path and os.path.exists(station_path):
-                shutil.rmtree(station_path)
-            if not new_path:
-                await DB.execute(
-                    'delete from blog_entries where "user" = %(callsign)s',
-                    {'callsign': callsign})
             station_path = new_path
             station_callsign = new_station_callsign
         if station_callsign:
