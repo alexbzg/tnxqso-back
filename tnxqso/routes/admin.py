@@ -22,7 +22,7 @@ async def suspicious_handler(_):
 
 @ADMIN_ROUTES.post('/aiohttp/publish')
 @auth(require_admin=True)
-async def publish_handler(data, _):
+async def publish_handler(data, **_):
     publish_path = WEB_ROOT + '/js/publish.json'
     publish = loadJSON(publish_path) or {}
     publish[data['station']] = data['publish']
