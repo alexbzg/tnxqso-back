@@ -16,7 +16,7 @@ RE_STRIP_CALLSIGN = re.compile(r"\d?[a-z]+\d+[a-z]+")
 
 def strip_callsign(callsign):
     """remove prefixes/suffixes from callsign"""
-    cs_match = RE_STRIP_CALLSIGN.search(callsign)
+    cs_match = RE_STRIP_CALLSIGN.search(callsign.lower())
     return cs_match.group(0) if cs_match else None
 
 def get_station_path(callsign):

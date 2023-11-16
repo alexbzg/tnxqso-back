@@ -108,9 +108,9 @@ def auth(require_token=True,
         require_admin=False,
         require_email_confirmed=False):
 
-    def auth_wrapper(func):
+    def auth_wrapper(handler):
 
-        @wraps(func)
+        @wraps(handler)
         async def auth_wrapped(request):
             data = None
             if 'multipart/form-data;' in (request.headers.get(aiohttp.hdrs.CONTENT_TYPE) or ''):
@@ -119,7 +119,6 @@ def auth(require_token=True,
                 data = await request.json()
 
             callsign = email = None
-            logging.debug(data)
             if 'token' in data:
                 callsign, email = decode_token(data['token'], require_email=require_email)
                 await authenticate(callsign, email, require_email_confirmed=require_email_confirmed,
@@ -127,7 +126,7 @@ def auth(require_token=True,
             elif require_token:
                 raise web.HTTPBadRequest(text='Token is missing')
 
-            return await func(data, callsign=callsign, email=email, request=request)
+            return await handler(data, callsign=callsign, email=email, request=request)
 
         return auth_wrapped
 

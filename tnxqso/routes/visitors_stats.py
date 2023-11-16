@@ -1,10 +1,10 @@
 #!/usr/bin/python3
 #coding=utf-8
-
 from aiohttp import web
 
 from tnxqso.db import DB
 from tnxqso.services.auth import auth, SITE_ADMINS
+from tnxqso.services.station_dir import strip_callsign
 
 VISITORS_ROUTES = web.RouteTableDef()
 
@@ -27,11 +27,11 @@ async def visitors_handler(data, *, callsign, **_):
 @auth()
 async def visitors_stats_handler(data, *, callsign, **_):
     if callsign not in SITE_ADMINS:
-        station_settings = await DB.execute("""
+        user_station_callsign = (await DB.execute("""
         select settings from users
         where callsign = %(callsign)s""",
-        {'callsign': callsign})
-        if station_settings['station']['callsign'] != data['station']:
+        {'callsign': callsign}))['settings']['station']['callsign']
+        if strip_callsign(user_station_callsign) != data['station']:
             raise web.HTTPForbidden()
     result = {'day': {}, 'week': {}, 'total': {}}
     wheres = {'day': "and visited >= now() - interval '1 day'",
@@ -43,10 +43,8 @@ async def visitors_stats_handler(data, *, callsign, **_):
             from visitors
             where station = %(station)s {where}
             group by tab""",
-            {'station': data['station']})
+            data, container='list')
         if db_res:
-            if isinstance(db_res, dict):
-                db_res = [db_res]
             for row in db_res:
                 result[period][row['tab']] = row['visitors_count']
             result[period]['total'] = (await DB.execute(f"""
