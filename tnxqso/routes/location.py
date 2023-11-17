@@ -68,7 +68,7 @@ async def wfs_query(wfs_type, location, strict=False):
     try:
         data = ''
         async with httpx.AsyncClient() as client:
-            rsp = await client.get(url.format_map(url_params), timeout=(0.2, 1))
+            rsp = await client.get(url.format_map(url_params), timeout=(0.4, 2))
             data = rsp.text
         tag = '<cite:' + params['tag'] + '>'
         result = []
@@ -77,13 +77,13 @@ async def wfs_query(wfs_type, location, strict=False):
             end = data.find('<', start)
             result.append(data[start:end])
             data = data[end:]
-        if result:
-            return result[0] if strict else result
-        return None
+        if not result:
+            logging.error('invalid wfs response: %s', data)
+        return result
 
     except httpx.TimeoutException:
         logging.exception('wfs query timeout: ')
-        return ['-----']
+        return None
 
 async def get_qth_data(location, country=None):
 
@@ -101,15 +101,15 @@ async def get_qth_data(location, country=None):
         all_rda = await wfs_query('rda', location)
         strict_rda = await wfs_query('rda', location, strict=True)
         if all_rda:
-            if len(all_rda) > 1:
-                all_rda = [strict_rda] + [x for x in all_rda if x != strict_rda or x == '-----']
-                rda = ' '.join(all_rda)
-            else:
-                rda = all_rda[0]
+            if strict_rda:
+                all_rda.sort(key=lambda item: item != strict_rda[0])
+            rda = " ".join(all_rda)
+        elif strict_rda:
+            rda = strict_rda[0]
         data['fields']['values'][0] = rda
 
-        data['fields']['values'][1] = RAFA_LOCS[data['loc']]\
-            if data['loc'] in RAFA_LOCS else None
+        data['fields']['values'][1] = (RAFA_LOCS[data['loc']]
+            if data['loc'] in RAFA_LOCS else None)
 
     elif country == 'KZ':
 
@@ -129,6 +129,9 @@ async def get_qth_data(location, country=None):
 
     elif country == 'GB':
         data['fields']['values'][0] = await wfs_query('wab', location, strict=True)
+
+    if data['fields']['values'][0] == '-----':
+        logging.error('wfs query failed, location %s, country %s', location, country)
 
     return data
 

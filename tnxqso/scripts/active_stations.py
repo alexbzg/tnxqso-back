@@ -7,6 +7,10 @@ import json
 import time
 
 from tnxqso.common import WEB_ROOT, loadJSON, startLogging
+from tnxqso.services.station_dir import get_station_path
+
+ONLINE_INT = 120
+FREQ_INT = 300
 
 def main():
     startLogging('active_stations', logging.DEBUG)
@@ -17,18 +21,17 @@ def main():
     today = datetime.utcnow().date()
     now = time.time()
 
-    ONLINE_INT = 120
-    FREQ_INT = 300
 
     for callsign, publish_settings in publish.items():
         if all(publish_settings.values()):
-            station_path = f"{WEB_ROOT}/stations/{callsign.lower().replace('/', '-')}"
+            station_path = get_station_path(callsign)
             station_settings = loadJSON(f'{station_path}/settings.json')
             if (station_settings and station_settings.get('station') and
                 station_settings['station'].get('callsign') and
                 station_settings['station'].get('activityPeriod')):
                 activity_period = [datetime.strptime(item, '%d.%m.%Y').date()
-                        for item in station_settings['station']['activityPeriod'] if item is not None]
+                        for item in station_settings['station']['activityPeriod']
+                            if item is not None]
                 if len(activity_period) == 2 and activity_period[0] <= today <= activity_period[1]:
                     status = loadJSON(f'{station_path}/status.json')
                     if station_settings['status']['get'] != 'manual':
