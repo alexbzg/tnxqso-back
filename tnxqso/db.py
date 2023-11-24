@@ -30,7 +30,7 @@ def param_str(params, delim):
 
 def splice_params(data, params):
     return {param: json.dumps(data[param])
-            if isinstance(data[param],dict) else data[param]
+            if isinstance(data[param], dict) else data[param]
         for param in params
         if param in data}
 

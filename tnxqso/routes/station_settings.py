@@ -66,13 +66,13 @@ async def station_user_ban_list_handler(request):
         container="list")) or []
     return web.json_response(rsp_data)
 
-@STATION_SETTINGS_ROUTES.post('/aiohttp/station/file')
+@STATION_SETTINGS_ROUTES.post('/aiohttp/station/files')
 @auth(require_email_confirmed=True)
 async def station_file_post_handler(data, *, callsign, **_):
     for key in data:
         if key in STATION_FILES:
             await write_station_file(callsign, STATION_FILES[key]['file_name'], data[key],
-                    binary=STATION_FILES['key'].get('binary'))
+                    binary=STATION_FILES[key].get('binary'))
     return web.Response(text = 'OK')
 
 @STATION_SETTINGS_ROUTES.post('/aiohttp/station/track')

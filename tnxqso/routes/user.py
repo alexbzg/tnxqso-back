@@ -14,7 +14,7 @@ from tnxqso.services.email import send_email
 from tnxqso.services.station_dir import update_station_settings
 
 USER_ROUTES = web.RouteTableDef()
-USER_FIELDS = frozenset('email', 'password', 'name', 'chat_callsign', 'pm_enabled')
+USER_FIELDS = frozenset(('email', 'password', 'name', 'chat_callsign', 'pm_enabled'))
 
 @USER_ROUTES.post('/aiohttp/userData')
 @auth()
@@ -28,7 +28,9 @@ async def user_data_handler(_data, *, callsign, **_):
 @USER_ROUTES.post('/aiohttp/user')
 @auth()
 async def user_settings_post_handler(data, *, callsign, **_):
+    logging.debug("user settings post: %s", data)
     if data.get('chat_callsign') and len(data['chat_callsign']) < 3:
+        logging.debug("chat_callsign: %s", data.get('chat_callsign'))
         raise web.HTTPBadRequest(text='Chat callsign should have 3 or more characters.')
     if 'settings' in data:
         await update_station_settings(callsign, data['settings'])

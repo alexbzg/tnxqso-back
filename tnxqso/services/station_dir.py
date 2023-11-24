@@ -78,9 +78,9 @@ async def update_station_settings(callsign, settings):
 async def save_station_settings(admin_callsign, settings):
     settings['admin'] = admin_callsign
     settings['initialized'] = True
-    settings_dump = json.dumps(settings)
-    await DB.param_update('users', {'callsign': admin_callsign}, {'settings': settings_dump})
-    await write_station_file(admin_callsign, 'settings.json', settings_dump)
+    await DB.param_update('users', {'callsign': admin_callsign},
+            {'settings': json.dumps(settings)})
+    await write_station_file(admin_callsign, 'settings.json', settings)
 
 async def write_station_file(admin_callsign, file_name, contents, *, binary=False):
     station_path = await get_station_path_by_admin_cs(admin_callsign)
