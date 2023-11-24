@@ -119,7 +119,7 @@ def auth(require_token=True,
                 data = await request.json()
 
             callsign = email = None
-            if 'token' in data:
+            if data.get('token'):
                 callsign, email = decode_token(data['token'], require_email=require_email)
                 await authenticate(callsign, email, require_email_confirmed=require_email_confirmed,
                         require_admin=require_admin)

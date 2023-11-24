@@ -7,12 +7,14 @@ import json
 from aiohttp import web
 
 from tnxqso.common import CONF, WEB_ADDRESS, DEF_USER_SETTINGS, web_json_response
-from tnxqso.db import DB
+from tnxqso.db import DB, splice_params
 from tnxqso.services.auth import (auth, SITE_ADMINS, BANLIST, decode_token, encode_token,
         check_recaptcha, authenticate)
 from tnxqso.services.email import send_email
+from tnxqso.services.station_dir import update_station_settings
 
 USER_ROUTES = web.RouteTableDef()
+USER_FIELDS = frozenset('email', 'password', 'name', 'chat_callsign', 'pm_enabled')
 
 @USER_ROUTES.post('/aiohttp/userData')
 @auth()
@@ -22,6 +24,17 @@ async def user_data_handler(_data, *, callsign, **_):
     if callsign in SITE_ADMINS:
         user_data['siteAdmin'] = True
     return web_json_response(user_data)
+
+@USER_ROUTES.post('/aiohttp/user')
+@auth()
+async def user_settings_post_handler(data, *, callsign, **_):
+    if data.get('chat_callsign') and len(data['chat_callsign']) < 3:
+        raise web.HTTPBadRequest(text='Chat callsign should have 3 or more characters.')
+    if 'settings' in data:
+        await update_station_settings(callsign, data['settings'])
+    if any(field in USER_FIELDS for field in data):
+        await DB.param_update('users', {'callsign': callsign}, splice_params(data, USER_FIELDS))
+    return web.Response(text = 'OK')
 
 @USER_ROUTES.post('/aiohttp/login')
 async def login_handler(request):
