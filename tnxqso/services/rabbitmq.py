@@ -6,7 +6,7 @@ import aio_pika
 import aiormq
 from bson.json_util import dumps
 
-from tnxqso.common import CONF
+from tnxqso.common import CONF, json_dumps
 
 async def rabbitmq_connect(app):
     try:
@@ -45,7 +45,7 @@ async def rabbitmq_publish(exchange, key, message):
     try:
         await exchange.publish(
             aio_pika.Message(
-                body=bytes(dumps(message), 'utf-8'),
+                body=bytes(json_dumps(message), 'utf-8'),
                 ),
             routing_key=key
             )

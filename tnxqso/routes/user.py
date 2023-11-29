@@ -23,6 +23,19 @@ async def user_data_handler(_data, *, callsign, **_):
         user_data['siteAdmin'] = True
     return web_json_response(user_data)
 
+@USER_ROUTES.post('/aiohttp/anonymous/token')
+async def get_anonymous_token():
+    return web_json_response({'token': encode_token({
+        'aud': ['tnxqso', 'rabbitmq'],
+        'scope': [
+            f'rabbitmq.read:{CONF["rabbitmq"]["virtual_host"]}/chat/*',
+            f'rabbitmq.configure:{CONF["rabbitmq"]["virtual_host"]}/chat/*',
+            f'rabbitmq.read:{CONF["rabbitmq"]["virtual_host"]}/stomp-subscription-*',
+            f'rabbitmq.write:{CONF["rabbitmq"]["virtual_host"]}/stomp-subscription-*',
+            f'rabbitmq.configure:{CONF["rabbitmq"]["virtual_host"]}/stomp-subscription-*'
+            ]
+        }, disable_time=True)})
+
 @USER_ROUTES.post('/aiohttp/login')
 async def login_handler(request):
     data = await request.json()
@@ -62,6 +75,8 @@ async def login_handler(request):
         'scope': [
             f'rabbitmq.read:{CONF["rabbitmq"]["virtual_host"]}/pm/{data["login"]}',
             f'rabbitmq.configure:{CONF["rabbitmq"]["virtual_host"]}/pm/{data["login"]}',
+            f'rabbitmq.read:{CONF["rabbitmq"]["virtual_host"]}/chat/*',
+            f'rabbitmq.configure:{CONF["rabbitmq"]["virtual_host"]}/chat/*',
             f'rabbitmq.read:{CONF["rabbitmq"]["virtual_host"]}/stomp-subscription-*',
             f'rabbitmq.write:{CONF["rabbitmq"]["virtual_host"]}/stomp-subscription-*',
             f'rabbitmq.configure:{CONF["rabbitmq"]["virtual_host"]}/stomp-subscription-*'
