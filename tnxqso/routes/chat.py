@@ -55,27 +55,6 @@ async def chat_delete_handler(data, *, callsign, **_):
 
 @CHAT_ROUTES.post('/aiohttp/chat')
 @auth(require_email_confirmed=True)
-async def chat_post_handler(data, *, callsign, **_):
-    chat_path = ''
-    station = data['station'] if 'station' in data else None
-    if station:
-        station_path = get_station_path(data['station'])
-        station_settings = loadJSON(station_path + '/settings.json')
-        admins = [x.lower() for x in\
-            station_settings['chatAdmins'] + [ station_settings['admin'], ]]
-        admin = callsign in admins
-        chat_path = station_path + '/chat.json'
-        chat_access = station_settings.get('chatAccess')
-        if chat_access == 'admins' and not admin:
-            raise web.HTTPUnauthorized(text='Station admin required')
-        if await DB.execute("""
-            select true from user_bans
-            where admin_callsign = %(admin)s and banned_callsign = %(banned)s""",
-            {'admin': station_settings['admin'], 'banned': callsign}):
-            raise web.HTTPUnauthorized(text='Your account is set read-only in this chat')
-    else:
-        chat_path = WEB_ROOT + '/js/talks.json'
-        admin = callsign in SITE_ADMINS
-    data['cs'] = callsign
-    insert_chat_message(path=chat_path, msg_data=data, admin=admin)
+async def chat_post_handler(data, *, callsign, request, **_):
+    await insert_chat_message(data, callsign, request)
     return web.Response(text = 'OK')

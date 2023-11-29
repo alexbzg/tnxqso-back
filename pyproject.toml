@@ -13,13 +13,14 @@ pymongo = "^4.6"
 python-ffmpeg = "^2.0"
 Wand = "^0.6"
 httpx = "^0.25"
-pika = "^1.3"
 PyJWT = "^2.8"
 reverse_geocoder = "^1.5"
+aio-pika = "^9.3.1"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.0.0"
 pytest_asyncio = "^0.21"
+poetry-lock-package = "^0.5.0"
 
 [tool.poetry.scripts]
 server_run = "tnxqso.srv:run"

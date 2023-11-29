@@ -153,7 +153,7 @@ def save_qth_now_location(callsign, location, path):
 
 @LOCATION_ROUTES.post('/aiohttp/location')
 @auth(require_token=False)
-async def location_handler(data, *, callsign, **_):
+async def location_handler(data, *, callsign, request):
     new_data = data
     station_path = None
     station_settings = None
@@ -203,11 +203,12 @@ async def location_handler(data, *, callsign, **_):
     if 'freq' in new_data and new_data['freq']:
         data['freq'] = {'value': new_data['freq'], 'ts': data['ts']}
         from_callsign = station_settings['station']['callsign']
-        insert_chat_message(path=station_path + '/chat.json',
-            msg_data={'from': from_callsign,
-            'cs': callsign,
+        await insert_chat_message(
+            {'from': from_callsign,
             'text': '<b><i>' + new_data['freq'] + '</b></i>'},
-            admin=True)
+            callsign,
+            request,
+            force_admin=True)
     country = station_settings['qthCountry'] if 'qthCountry' in station_settings else None
     if new_data.get('location'):
         location = new_data['location']
