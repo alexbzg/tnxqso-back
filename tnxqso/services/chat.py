@@ -4,8 +4,10 @@ import time
 import json
 from datetime import datetime
 
+from aiohttp import web
+
 from tnxqso.common import CONF, loadJSON, dtFmt, WEB_ROOT
-from tnxqso.services.station_dir import get_station_path
+from tnxqso.services.station_dir import get_station_path, strip_callsign
 from tnxqso.services.auth import SITE_ADMINS
 from tnxqso.services.rabbitmq import rabbitmq_publish
 from tnxqso.db import DB
@@ -59,4 +61,5 @@ async def insert_chat_message(data, callsign, request, force_admin=False):
         json.dump(chat, f_chat, ensure_ascii = False)
     if request.app.get('rabbitmq') and request.app['rabbitmq']['exchanges'].get('chats'):
         await rabbitmq_publish(request.app['rabbitmq']['exchanges']['chats'],
-                key=station if station else 'talks', message=msg)
+                key=strip_callsign(station) if station else 'talks',
+                message={'add_item': msg})

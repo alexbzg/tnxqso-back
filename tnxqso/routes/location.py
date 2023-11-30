@@ -153,7 +153,7 @@ def save_qth_now_location(callsign, location, path):
 
 @LOCATION_ROUTES.post('/aiohttp/location')
 @auth(require_token=False)
-async def location_handler(data, *, callsign, request):
+async def location_handler(data, *, callsign, request, **_):
     new_data = data
     station_path = None
     station_settings = None
