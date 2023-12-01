@@ -38,10 +38,8 @@ def main():
                         status['online'] = status.get('ts') and (now - status['ts'] < ONLINE_INT)
                     else:
                         status['online'] = status.get('online', False)
-                    if status.get('freq') and status['freq'].get('value'):
-                        status['freq'] = (status['freq']['value']
-                                if now - status['freq']['ts'] < FREQ_INT else None)
-                    else:
+                    if (status.get('freq') and status['freq'].get('value') and
+                            now - status['freq']['ts'] > FREQ_INT):
                         status['freq'] = None
                     if status.get('speed') and now - status['locTs'] > ONLINE_INT:
                         status['speed'] = 0
