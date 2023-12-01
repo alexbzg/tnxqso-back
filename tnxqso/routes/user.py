@@ -17,13 +17,25 @@ USER_ROUTES = web.RouteTableDef()
 USER_FIELDS = frozenset(('email', 'password', 'name', 'chat_callsign', 'pm_enabled'))
 
 @USER_ROUTES.post('/aiohttp/userData')
-@auth()
+@auth(require_token=False)
 async def user_data_handler(_data, *, callsign, **_):
-    user_data = await DB.get_user_data(callsign)
-    del user_data['password']
-    if callsign in SITE_ADMINS:
-        user_data['siteAdmin'] = True
-    return web_json_response(user_data)
+    if callsign:
+        user_data = await DB.get_user_data(callsign)
+        del user_data['password']
+        if callsign in SITE_ADMINS:
+            user_data['siteAdmin'] = True
+        return web_json_response(user_data)
+
+    return web_json_response({'anonToken': encode_token({
+        'aud': ['tnxqso', 'rabbitmq'],
+        'scope': [
+            f'rabbitmq.read:{CONF["rabbitmq"]["virtual_host"]}/chat/*',
+            f'rabbitmq.configure:{CONF["rabbitmq"]["virtual_host"]}/chat/*',
+            f'rabbitmq.read:{CONF["rabbitmq"]["virtual_host"]}/stomp-subscription-*',
+            f'rabbitmq.write:{CONF["rabbitmq"]["virtual_host"]}/stomp-subscription-*',
+            f'rabbitmq.configure:{CONF["rabbitmq"]["virtual_host"]}/stomp-subscription-*'
+            ]
+        }, disable_time=True)})
 
 @USER_ROUTES.post('/aiohttp/user')
 @auth()
@@ -77,6 +89,8 @@ async def login_handler(request):
         'scope': [
             f'rabbitmq.read:{CONF["rabbitmq"]["virtual_host"]}/pm/{data["login"]}',
             f'rabbitmq.configure:{CONF["rabbitmq"]["virtual_host"]}/pm/{data["login"]}',
+            f'rabbitmq.read:{CONF["rabbitmq"]["virtual_host"]}/chat/*',
+            f'rabbitmq.configure:{CONF["rabbitmq"]["virtual_host"]}/chat/*',
             f'rabbitmq.read:{CONF["rabbitmq"]["virtual_host"]}/stomp-subscription-*',
             f'rabbitmq.write:{CONF["rabbitmq"]["virtual_host"]}/stomp-subscription-*',
             f'rabbitmq.configure:{CONF["rabbitmq"]["virtual_host"]}/stomp-subscription-*'

@@ -4,7 +4,6 @@ import asyncio
 
 import aio_pika
 import aiormq
-from bson.json_util import dumps
 
 from tnxqso.common import CONF, json_dumps
 
