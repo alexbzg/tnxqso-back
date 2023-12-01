@@ -8,12 +8,13 @@ from aiohttp import web
 from tnxqso.common import CONF, json_dumps, web_json_response
 from tnxqso.db import DB
 from tnxqso.services.auth import auth
+from tnxqso.services.rabbitmq import rabbitmq_publish
 
 PM_ROUTES = web.RouteTableDef()
 
 @PM_ROUTES.post('/aiohttp/privateMessages/post')
 @auth(require_email_confirmed=True)
-async def private_messages_post_handler(data, **_):
+async def private_messages_post_handler(data, *, request, **_):
     receiver = await DB.get_user_data(data['callsign_to'])
     if not receiver or not receiver['pm_enabled']:
         raise web.HTTPBadRequest(
@@ -25,6 +26,13 @@ async def private_messages_post_handler(data, **_):
     sender = await DB.get_user_data(data['callsign_from'])
     msg['chat_callsign_from'], msg['name_from'] = sender['chat_callsign'], sender['name']
 
+    if request.app.get('rabbitmq') and request.app['rabbitmq']['exchanges'].get('pm'):
+        await rabbitmq_publish(request.app['rabbitmq']['exchanges']['pm'],
+                key=data['callsign_to'], message=msg)
+
+    return web.Response(text='OK')
+
+"""
     rabbitmq_connection = pika.BlockingConnection(pika.ConnectionParameters(
         host=CONF['rabbitmq']['host'],
         virtual_host=CONF['rabbitmq']['virtual_host'],
@@ -36,8 +44,7 @@ async def private_messages_post_handler(data, **_):
     rabbitmq_channel.basic_publish(exchange='pm', routing_key=data['callsign_to'],
             body=json_dumps(msg))
     rabbitmq_connection.close()
-
-    return web.Response(text='OK')
+"""
 
 @PM_ROUTES.post('/aiohttp/privateMessages/get')
 @auth()

@@ -22,6 +22,8 @@ from tnxqso.routes.active_users import ACTIVE_USERS_ROUTES
 from tnxqso.routes.chat import CHAT_ROUTES
 from tnxqso.routes.cluster import CLUSTER_ROUTES
 
+from tnxqso.services.rabbitmq import rabbitmq_connect, rabbitmq_disconnect
+
 startLogging('srv', logging.DEBUG)
 logging.debug("server start")
 
@@ -45,7 +47,13 @@ def run():
 
     async def on_startup(_):
         await DB.connect()
+        await rabbitmq_connect(APP)
+
+    async def on_cleanup(_):
+        await DB.disconnect()
+        await rabbitmq_disconnect(APP)
 
     APP.on_startup.append(on_startup)
+    APP.on_cleanup.append(on_cleanup)
 
     web.run_app(APP, path = CONF.get('sockets', 'srv'))

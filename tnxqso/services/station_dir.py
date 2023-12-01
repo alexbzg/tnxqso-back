@@ -23,7 +23,7 @@ def strip_callsign(callsign):
     return cs_match.group(0) if cs_match else None
 
 def get_station_path(callsign):
-    return f"{WEB_ROOT}/stations/{strip_callsign(callsign.lower())}"
+    return f"{WEB_ROOT}/stations/{strip_callsign(callsign)}"
 
 async def get_station_path_by_admin_cs(admin_cs):
     station_cs = await DB.get_station_callsign(admin_cs)
