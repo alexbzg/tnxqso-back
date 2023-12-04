@@ -7,7 +7,7 @@ from aiohttp import web
 
 from tnxqso.common import WEB_ROOT, loadJSON
 from tnxqso.db import DB, splice_params
-from tnxqso.services.auth import auth, BANLIST
+from tnxqso.services.auth import auth, BANLIST, SITE_ADMINS
 from tnxqso.services.station_dir import save_station_settings, get_station_path
 
 ADMIN_ROUTES = web.RouteTableDef()
@@ -38,6 +38,8 @@ async def publish_handler(data, **_):
 @ADMIN_ROUTES.post('/aiohttp/banUser')
 @auth(require_admin=True)
 async def ban_user_handler(data, **_):
+    if data['user'] in SITE_ADMINS:
+        return web.HTTPBadRequest(text='Site admin can never be banned')
     user_data = await DB.get_user_data(data['user'])
     if not user_data:
         return web.HTTPNotFound(text='User not found')

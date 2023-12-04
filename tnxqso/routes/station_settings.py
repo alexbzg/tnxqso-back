@@ -38,11 +38,13 @@ async def check_station_chat_admin(station_admin, callsign):
 async def station_user_ban_post_handler(data, *, callsign, **_):
     if callsign != data['stationAdmin']:
         await check_station_chat_admin(data['stationAdmin'], callsign)
+    if data['banned'] == callsign:
+        return web.HTTPBadRequest(text='You should not ban yourself')
     await DB.execute("""
         insert into user_bans (admin_callsign, banned_callsign)
         values (%(admin)s, %(banned)s)
         """, {'admin': data['stationAdmin'], 'banned': data['banned']})
-    return web.Response(text = 'OK')
+    return web.Response(text='OK')
 
 @STATION_SETTINGS_ROUTES.delete('/aiohttp/station/banlist')
 @auth()
