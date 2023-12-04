@@ -24,31 +24,34 @@ def main():
 
     for callsign, publish_settings in publish.items():
         if all(publish_settings.values()):
-            station_path = get_station_path(callsign)
-            station_settings = loadJSON(f'{station_path}/settings.json')
-            if (station_settings and station_settings.get('station') and
-                station_settings['station'].get('callsign') and
-                station_settings['station'].get('activityPeriod')):
-                activity_period = [datetime.strptime(item, '%d.%m.%Y').date()
-                        for item in station_settings['station']['activityPeriod']
-                            if item is not None]
-                if len(activity_period) == 2 and activity_period[0] <= today <= activity_period[1]:
-                    status = loadJSON(f'{station_path}/status.json')
-                    if station_settings['status']['get'] != 'manual':
-                        status['online'] = status.get('ts') and (now - status['ts'] < ONLINE_INT)
-                    else:
-                        status['online'] = status.get('online', False)
-                    if (status.get('freq') and status['freq'].get('value') and
-                            now - status['freq']['ts'] > FREQ_INT):
-                        status['freq'] = None
-                    if status.get('speed') and now - status['locTs'] > ONLINE_INT:
-                        status['speed'] = 0
-                    else:
-                        status['speed'] = status.get('speed')
-                    data.append({
-                        'callsign': callsign,
-                        'status': status
-                        })
+            try:
+                station_path = get_station_path(callsign)
+                station_settings = loadJSON(f'{station_path}/settings.json')
+                if (station_settings and station_settings.get('station') and
+                    station_settings['station'].get('callsign') and
+                    station_settings['station'].get('activityPeriod')):
+                    activity_period = [datetime.strptime(item, '%d.%m.%Y').date()
+                            for item in station_settings['station']['activityPeriod']
+                                if item is not None]
+                    if len(activity_period) == 2 and activity_period[0] <= today <= activity_period[1]:
+                        status = loadJSON(f'{station_path}/status.json')
+                        if station_settings['status']['get'] != 'manual':
+                            status['online'] = status.get('ts') and (now - status['ts'] < ONLINE_INT)
+                        else:
+                            status['online'] = status.get('online', False)
+                        if (status.get('freq') and status['freq'].get('value') and
+                                now - status['freq']['ts'] > FREQ_INT):
+                            status['freq'] = None
+                        if status.get('speed') and now - status['locTs'] > ONLINE_INT:
+                            status['speed'] = 0
+                        else:
+                            status['speed'] = status.get('speed')
+                        data.append({
+                            'callsign': callsign,
+                            'status': status
+                            })
+            except Exception as exc:
+                logging.exception("Error processing station %s", callsign)
 
     data.sort(key=lambda item: item['callsign'])
     with open(f'{WEB_ROOT}/js/activeStations.json', 'w') as f_stations:
