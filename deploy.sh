@@ -1,7 +1,4 @@
 #!/bin/bash
-git checkout master
-git merge wip
-git commit -am "release $1"
 cd ../tnxqso
 git pull
 systemctl stop tnxqso
