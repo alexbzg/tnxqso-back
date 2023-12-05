@@ -207,7 +207,8 @@ async def location_handler(data, *, callsign, request, **_):
         data['freq'] = {'value': new_data['freq'], 'ts': data['ts']}
         from_callsign = station_settings['station']['callsign']
         await insert_chat_message(
-            {'from': from_callsign,
+            {'tation': from_callsign,
+            'from': from_callsign,
             'text': '<b><i>' + new_data['freq'] + '</b></i>'},
             callsign,
             request,
