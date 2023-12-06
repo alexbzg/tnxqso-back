@@ -31,8 +31,7 @@ async def publish_handler(data, **_):
     station_path = get_station_path(data['station'])
     station_settings = loadJSON(station_path + '/settings.json')
     station_settings['publish'] = data['publish']['user']
-    await save_station_settings(data['station'], station_settings['admin'],
-            station_settings)
+    await save_station_settings(station_settings['admin'], station_settings)
     return web.Response(text = 'OK')
 
 @ADMIN_ROUTES.post('/aiohttp/banUser')

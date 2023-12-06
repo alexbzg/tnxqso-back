@@ -12,7 +12,8 @@ import httpx
 
 from tnxqso.common import WEB_ROOT, loadJSON, appRoot, dtFmt
 from tnxqso.services.auth import auth
-from tnxqso.services.station_dir import get_station_path_by_admin_cs
+from tnxqso.services.station_dir import (get_station_path_by_admin_cs,
+    read_station_file, write_station_file)
 from tnxqso.services.countries import get_country
 from tnxqso.services.chat import insert_chat_message
 
@@ -162,8 +163,7 @@ async def location_handler(data, *, callsign, request, **_):
     station_settings = None
     station_callsign = None
     if callsign:
-        station_path = await get_station_path_by_admin_cs(callsign)
-        station_settings = loadJSON(station_path + '/settings.json')
+        station_settings = await read_station_file(callsign, '/settings.json')
         if not station_settings:
             raise web.HTTPBadRequest(text='Expedition profile is not initialized.')
         if (station_settings.get('station') and
@@ -193,8 +193,7 @@ async def location_handler(data, *, callsign, request, **_):
     if not callsign and 'location' in new_data:
         qth = await get_qth_data(new_data['location'])
         return web.json_response({'qth': qth})
-    f_path = station_path + '/status.json'
-    data = loadJSON(f_path) or {}
+    data = (await read_station_file(callsign, 'status.json')) or {}
     if 'locTs' not in data and 'ts' in data:
         data['locTs'] = data['ts']
     dt_utc = datetime.utcnow()
@@ -213,7 +212,7 @@ async def location_handler(data, *, callsign, request, **_):
             callsign,
             request,
             force_admin=True)
-    country = station_settings['qthCountry'] if 'qthCountry' in station_settings else None
+    country = station_settings.get('qthCountry')
     if new_data.get('location'):
         location = new_data['location']
 
@@ -253,8 +252,7 @@ async def location_handler(data, *, callsign, request, **_):
         if 'loc' in new_data['qth']:
             data['qth']['loc'] = new_data['qth']['loc']
 
-    with open(f_path, 'w') as f_status:
-        json.dump(data, f_status, ensure_ascii = False)
+    await write_station_file(callsign, 'status.json', data)
     return web.json_response(data)
 
 def locator(location):

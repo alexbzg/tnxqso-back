@@ -90,6 +90,10 @@ async def write_station_file(admin_callsign, file_name, contents, *, binary=Fals
                 contents = json.dumps(contents, ensure_ascii=False)
             f_dest.write(contents)
 
+async def read_station_file(admin_callsign, file_name):
+    station_path = await get_station_path_by_admin_cs(admin_callsign)
+    return loadJSON(f"{station_path}/{file_name}")
+
 def create_station_dir(path):
     if not os.path.exists(path):
         os.makedirs(path)

@@ -13,7 +13,8 @@ from aiohttp import web
 from tnxqso.common import CONF, dtFmt, loadJSON, tzOffset
 from tnxqso.db import DB
 from tnxqso.services.auth import auth, extract_callsign
-from tnxqso.services.station_dir import get_station_path_by_admin_cs
+from tnxqso.services.station_dir import (get_station_path_by_admin_cs,
+        read_station_file, write_station_file)
 
 QSO_LOG_ROUTES = web.RouteTableDef()
 
@@ -123,18 +124,9 @@ async def db_insert_qso(callsign, qso):
 @QSO_LOG_ROUTES.post('/aiohttp/log')
 @auth(require_email_confirmed=True)
 async def log_handler(data, *, callsign, **_):
-    station_path = await get_station_path_by_admin_cs(callsign)
-    log_path = station_path + '/log.json'
-    log = []
-    if not os.path.isfile(log_path):
-        logging.exception('%s not found', log_path)
-    try:
-        with open(log_path) as f_log:
-            log = json.load(f_log)
-    except Exception as ex:
-        logging.error("Error loading qso log %s", log_path)
-        logging.exception(ex)
-        log = await log_from_db(callsign)
+    log = await read_station_file(callsign, 'log.json')
+    if log is False:
+        log = (await log_from_db(callsign)) or []
 
     if 'qso' in data:
 
@@ -187,13 +179,11 @@ async def log_handler(data, *, callsign, **_):
                             log_qso['qso_ts'] = qso['qso_ts']
 
                 if new_qso:
-                    status_path = station_path + '/status.json'
-                    status_data = loadJSON(status_path)
+                    status_data = await read_station_file(callsign, 'status.json')
                     _ts = dtime.timestamp() + tzOffset()
                     if ('freq' not in status_data or status_data['freq']['ts'] < _ts):
                         status_data['freq'] = {'value': qso['freq'], 'ts': _ts}
-                        with open(status_path, 'w') as f_status:
-                            json.dump(status_data, f_status, ensure_ascii = False)
+                        await write_station_file(callsign, 'status.json', status_data)
 
                     qso['ts'] = time.time()
                     while [x for x in log if x['ts'] == qso['ts']]:
@@ -208,11 +198,11 @@ async def log_handler(data, *, callsign, **_):
         for qso in data['qso']:
             rsp.append((await process_qso(qso)))
 
-        log = sorted(log, key=lambda qso: qso['qso_ts'] if 'qso_ts' in qso else qso['ts']/10,\
+        log = sorted(log, key=lambda qso: qso['qso_ts'] if 'qso_ts' in qso else qso['ts']/10,
                 reverse=True)
         log = log[:CONF['web'].getint('log_page_length')]
-        with open(log_path, 'w') as f_log:
-            json.dump(log, f_log)
+        logging.debug(log)
+        await write_station_file(callsign, 'log.json', log)
 
         return web.json_response(rsp)
 
@@ -229,14 +219,13 @@ async def log_handler(data, *, callsign, **_):
             "delete from log where callsign = %(callsign)s",
             {'callsign': callsign})
         #clear sound recordings
+        station_path = await get_station_path_by_admin_cs(callsign)
         for file in Path(station_path + "/sound").glob("*"):
             if file.is_file():
                 file.unlink()
-        with open(station_path + '/sound.json', 'w') as f_sound:
-            json.dump([], f_sound)
+        await write_station_file(callsign, 'sound.json', [])
 
-    with open(log_path, 'w') as f_log:
-        json.dump(log, f_log)
+    await write_station_file(callsign, 'log.json', log)
     return web.Response(text = 'OK')
 
 @QSO_LOG_ROUTES.post('/aiohttp/logSearch')
