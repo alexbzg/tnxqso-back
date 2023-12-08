@@ -43,7 +43,7 @@ async def _main():
                 select id, "file", file_thumb
                 from blog_entries 
                 where "user" = %(admin)s and "file" is not null
-                order by id""", settings)
+                order by id""", settings, container='list')
             db_files = set()
             if db_media:
                 for entry in db_media:
