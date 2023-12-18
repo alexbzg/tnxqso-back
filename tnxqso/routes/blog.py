@@ -143,7 +143,7 @@ async def delete_blog_comment_handler(_data, *, callsign, request, **_):
 
 @BLOG_ROUTES.post('/aiohttp/blog/{entry_id}/comments')
 @auth(require_email_confirmed=True)
-async def create_blog_comment_handler(data, *, callsign, request):
+async def create_blog_comment_handler(data, *, callsign, request, **_):
     entry_id = int(request.match_info.get('entry_id', None))
     if not entry_id:
         raise web.HTTPBadRequest(text = 'No valid post id was specified.')

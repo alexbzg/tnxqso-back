@@ -67,6 +67,21 @@ def encode_token(payload, *, disable_time=False):
         payload['time'] = time.time()
     return jwt.encode(payload, SECRET, algorithm='HS256')
 
+def create_user_token(callsign):
+    return encode_token({
+        'callsign': callsign,
+        'aud': ['tnxqso', 'rabbitmq'],
+        'scope': [
+            f'rabbitmq.read:{CONF["rabbitmq"]["virtual_host"]}/pm/{callsign}',
+            f'rabbitmq.configure:{CONF["rabbitmq"]["virtual_host"]}/pm/{callsign}',
+            f'rabbitmq.read:{CONF["rabbitmq"]["virtual_host"]}/chat/*',
+            f'rabbitmq.configure:{CONF["rabbitmq"]["virtual_host"]}/chat/*',
+            f'rabbitmq.read:{CONF["rabbitmq"]["virtual_host"]}/stomp-subscription-*',
+            f'rabbitmq.write:{CONF["rabbitmq"]["virtual_host"]}/stomp-subscription-*',
+            f'rabbitmq.configure:{CONF["rabbitmq"]["virtual_host"]}/stomp-subscription-*'
+            ]
+        }, disable_time=True)
+
 async def authenticate(callsign, email=None, /, *,
         require_email_confirmed=True, require_admin=False):
     if callsign in BANLIST['callsigns']:

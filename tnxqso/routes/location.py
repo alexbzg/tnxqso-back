@@ -12,8 +12,7 @@ import httpx
 
 from tnxqso.common import WEB_ROOT, loadJSON, appRoot, dtFmt
 from tnxqso.services.auth import auth
-from tnxqso.services.station_dir import (get_station_path_by_admin_cs,
-    read_station_file, write_station_file)
+from tnxqso.services.station_dir import read_station_file, write_station_file
 from tnxqso.services.countries import get_country
 from tnxqso.services.chat import insert_chat_message
 
@@ -159,13 +158,13 @@ def save_qth_now_location(callsign, location, path):
 @auth(require_token=False)
 async def location_handler(data, *, callsign, request, **_):
     new_data = data
-    station_path = None
     station_settings = None
     station_callsign = None
     if callsign:
         station_settings = await read_station_file(callsign, '/settings.json')
         if not station_settings:
             raise web.HTTPBadRequest(text='Expedition profile is not initialized.')
+
         if (station_settings.get('station') and
                 station_settings['station'].get('callsign') and
                 station_settings['station'].get('activityPeriod')):

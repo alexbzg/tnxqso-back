@@ -9,7 +9,7 @@ from aiohttp import web
 from tnxqso.common import CONF, WEB_ADDRESS, DEF_USER_SETTINGS, web_json_response
 from tnxqso.db import DB, splice_params
 from tnxqso.services.auth import (auth, SITE_ADMINS, BANLIST, decode_token, encode_token,
-        check_recaptcha, authenticate)
+        create_user_token, check_recaptcha, authenticate)
 from tnxqso.services.email import send_email
 from tnxqso.services.station_dir import update_station_settings
 
@@ -24,6 +24,7 @@ async def user_data_handler(_data, *, callsign, **_):
         del user_data['password']
         if callsign in SITE_ADMINS:
             user_data['siteAdmin'] = True
+        user_data['token'] = create_user_token(callsign)
         return web_json_response(user_data)
 
     return web_json_response({'anonToken': encode_token({
@@ -83,19 +84,7 @@ async def login_handler(request):
             (user_data['password'] != data['password'] and
                 data['password'] != CONF.get('web', 'master_pwd'))):
             raise web.HTTPUnauthorized(text='Wrong callsign or password.')
-    user_data['token'] = encode_token({
-        'callsign': data['login'],
-        'aud': ['tnxqso', 'rabbitmq'],
-        'scope': [
-            f'rabbitmq.read:{CONF["rabbitmq"]["virtual_host"]}/pm/{data["login"]}',
-            f'rabbitmq.configure:{CONF["rabbitmq"]["virtual_host"]}/pm/{data["login"]}',
-            f'rabbitmq.read:{CONF["rabbitmq"]["virtual_host"]}/chat/*',
-            f'rabbitmq.configure:{CONF["rabbitmq"]["virtual_host"]}/chat/*',
-            f'rabbitmq.read:{CONF["rabbitmq"]["virtual_host"]}/stomp-subscription-*',
-            f'rabbitmq.write:{CONF["rabbitmq"]["virtual_host"]}/stomp-subscription-*',
-            f'rabbitmq.configure:{CONF["rabbitmq"]["virtual_host"]}/stomp-subscription-*'
-            ]
-        }, disable_time=True)
+    user_data['token'] = create_user_token(data['login'])
     del user_data['password']
     if data.get('newUser'):
         confirm_email_msg(user_data)
