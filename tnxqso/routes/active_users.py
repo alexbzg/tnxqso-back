@@ -8,13 +8,14 @@ from aiohttp import web
 
 from tnxqso.common import WEB_ROOT, loadJSON
 from tnxqso.services.auth import auth
+from tnxqso.services.rabbitmq import rabbitmq_publish
 from tnxqso.services.station_dir import get_station_path
 
 ACTIVE_USERS_ROUTES = web.RouteTableDef()
 
 @ACTIVE_USERS_ROUTES.post('/aiohttp/activeUsers')
 @auth()
-async def active_users_handler(data, *, callsign, **_):
+async def active_users_handler(data, *, callsign, request, **_):
     if not data.get('chat_callsign'):
         return web.Response(text = 'OK')
     station = data['station'] if 'station' in data else None
@@ -37,4 +38,7 @@ async def active_users_handler(data, *, callsign, **_):
             }
     with open(au_path, 'w') as f_au:
         json.dump(au_data, f_au, ensure_ascii = False)
+    await rabbitmq_publish(request.app['rabbitmq']['exchanges']['active_users'],
+        key='',
+        message=au_data[callsign])
     return web.Response(text = 'OK')

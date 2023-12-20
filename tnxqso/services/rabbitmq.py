@@ -32,6 +32,11 @@ async def rabbitmq_connect(app):
             type=aio_pika.ExchangeType.DIRECT,
             durable=True
             )
+        app['rabbitmq']['exchanges']['active_users'] = await channel.declare_exchange(
+            name='active_users',
+            type=aio_pika.ExchangeType.FANOUT,
+            durable=True
+            )
 
     except aiormq.exceptions.AMQPConnectionError:
         logging.exception("Rabbitmq connection error. Retry in 10 seconds")

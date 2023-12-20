@@ -76,6 +76,8 @@ def create_user_token(callsign):
             f'rabbitmq.configure:{CONF["rabbitmq"]["virtual_host"]}/pm/{callsign}',
             f'rabbitmq.read:{CONF["rabbitmq"]["virtual_host"]}/chat/*',
             f'rabbitmq.configure:{CONF["rabbitmq"]["virtual_host"]}/chat/*',
+            f'rabbitmq.read:{CONF["rabbitmq"]["virtual_host"]}/active_users',
+            f'rabbitmq.configure:{CONF["rabbitmq"]["virtual_host"]}/active_users',
             f'rabbitmq.read:{CONF["rabbitmq"]["virtual_host"]}/stomp-subscription-*',
             f'rabbitmq.write:{CONF["rabbitmq"]["virtual_host"]}/stomp-subscription-*',
             f'rabbitmq.configure:{CONF["rabbitmq"]["virtual_host"]}/stomp-subscription-*'
