@@ -5,12 +5,31 @@ import logging.handlers
 from datetime import datetime
 import json
 import time
+import asyncio
+
+import aiormq
+import aio_pika
 
 from tnxqso.common import WEB_ROOT, loadJSON, startLogging
 from tnxqso.services.station_dir import get_station_path
+from tnxqso.services.rabbitmq import create_connection, rabbitmq_publish
 
 ONLINE_INT = 120
 FREQ_INT = 300
+
+async def rabbitmq_post(data):
+    try:
+        connection = await create_connection()
+        channel = await connection.channel()
+        exchange = await channel.declare_exchange(
+            name='active_stations',
+            type=aio_pika.ExchangeType.FANOUT,
+            durable=True
+            )
+        await rabbitmq_publish(exchange, '', data)
+
+    except aiormq.exceptions.AMQPConnectionError:
+        logging.exception("Rabbitmq connection error.")
 
 def main():
     startLogging('active_stations', logging.DEBUG)
@@ -56,3 +75,5 @@ def main():
     data.sort(key=lambda item: item['callsign'])
     with open(f'{WEB_ROOT}/js/activeStations.json', 'w') as f_stations:
         json.dump(data, f_stations, ensure_ascii = False)
+
+    asyncio.run(rabbitmq_post(data))

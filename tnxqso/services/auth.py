@@ -67,6 +67,18 @@ def encode_token(payload, *, disable_time=False):
         payload['time'] = time.time()
     return jwt.encode(payload, SECRET, algorithm='HS256')
 
+TOKEN_SCOPE_COMMON = [
+    f'rabbitmq.read:{CONF["rabbitmq"]["virtual_host"]}/chat/*',
+    f'rabbitmq.configure:{CONF["rabbitmq"]["virtual_host"]}/chat/*',
+    f'rabbitmq.read:{CONF["rabbitmq"]["virtual_host"]}/active_users',
+    f'rabbitmq.configure:{CONF["rabbitmq"]["virtual_host"]}/active_users',
+    f'rabbitmq.read:{CONF["rabbitmq"]["virtual_host"]}/active_stations',
+    f'rabbitmq.configure:{CONF["rabbitmq"]["virtual_host"]}/active_stations',
+    f'rabbitmq.read:{CONF["rabbitmq"]["virtual_host"]}/stomp-subscription-*',
+    f'rabbitmq.write:{CONF["rabbitmq"]["virtual_host"]}/stomp-subscription-*',
+    f'rabbitmq.configure:{CONF["rabbitmq"]["virtual_host"]}/stomp-subscription-*'
+    ]
+
 def create_user_token(callsign):
     return encode_token({
         'callsign': callsign,
@@ -74,14 +86,7 @@ def create_user_token(callsign):
         'scope': [
             f'rabbitmq.read:{CONF["rabbitmq"]["virtual_host"]}/pm/{callsign}',
             f'rabbitmq.configure:{CONF["rabbitmq"]["virtual_host"]}/pm/{callsign}',
-            f'rabbitmq.read:{CONF["rabbitmq"]["virtual_host"]}/chat/*',
-            f'rabbitmq.configure:{CONF["rabbitmq"]["virtual_host"]}/chat/*',
-            f'rabbitmq.read:{CONF["rabbitmq"]["virtual_host"]}/active_users',
-            f'rabbitmq.configure:{CONF["rabbitmq"]["virtual_host"]}/active_users',
-            f'rabbitmq.read:{CONF["rabbitmq"]["virtual_host"]}/stomp-subscription-*',
-            f'rabbitmq.write:{CONF["rabbitmq"]["virtual_host"]}/stomp-subscription-*',
-            f'rabbitmq.configure:{CONF["rabbitmq"]["virtual_host"]}/stomp-subscription-*'
-            ]
+           ] + TOKEN_SCOPE_COMMON
         }, disable_time=True)
 
 async def authenticate(callsign, email=None, /, *,

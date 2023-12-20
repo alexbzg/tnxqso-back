@@ -7,15 +7,17 @@ import aiormq
 
 from tnxqso.common import CONF, json_dumps
 
+async def create_connection():
+    return await aio_pika.connect_robust(
+        host=CONF['rabbitmq']['host'],
+        login=CONF['rabbitmq']['user'],
+        password=CONF['rabbitmq']['password'],
+        virtualhost=CONF['rabbitmq']['virtual_host']
+    )
+
 async def rabbitmq_connect(app):
     try:
-        connection = await aio_pika.connect_robust(
-            host=CONF['rabbitmq']['host'],
-            login=CONF['rabbitmq']['user'],
-            password=CONF['rabbitmq']['password'],
-            virtualhost=CONF['rabbitmq']['virtual_host']
-            )
-
+        connection = await create_connection()
 
         app['rabbitmq'] = {
             'connection': connection,

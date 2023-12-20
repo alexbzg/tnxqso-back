@@ -9,7 +9,7 @@ from aiohttp import web
 from tnxqso.common import CONF, WEB_ADDRESS, DEF_USER_SETTINGS, web_json_response
 from tnxqso.db import DB, splice_params
 from tnxqso.services.auth import (auth, SITE_ADMINS, BANLIST, decode_token, encode_token,
-        create_user_token, check_recaptcha, authenticate)
+        create_user_token, check_recaptcha, authenticate, TOKEN_SCOPE_COMMON)
 from tnxqso.services.email import send_email
 from tnxqso.services.station_dir import update_station_settings
 
@@ -29,15 +29,7 @@ async def user_data_handler(_data, *, callsign, **_):
 
     return web_json_response({'anonToken': encode_token({
         'aud': ['tnxqso', 'rabbitmq'],
-        'scope': [
-            f'rabbitmq.read:{CONF["rabbitmq"]["virtual_host"]}/chat/*',
-            f'rabbitmq.configure:{CONF["rabbitmq"]["virtual_host"]}/chat/*',
-            f'rabbitmq.read:{CONF["rabbitmq"]["virtual_host"]}/active_users',
-            f'rabbitmq.configure:{CONF["rabbitmq"]["virtual_host"]}/active_users',
-            f'rabbitmq.read:{CONF["rabbitmq"]["virtual_host"]}/stomp-subscription-*',
-            f'rabbitmq.write:{CONF["rabbitmq"]["virtual_host"]}/stomp-subscription-*',
-            f'rabbitmq.configure:{CONF["rabbitmq"]["virtual_host"]}/stomp-subscription-*'
-            ]
+        'scope': TOKEN_SCOPE_COMMON
         }, disable_time=True)})
 
 @USER_ROUTES.post('/aiohttp/user')
