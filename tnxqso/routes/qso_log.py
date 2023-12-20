@@ -186,7 +186,7 @@ async def log_handler(data, *, callsign, **_):
                         status_data['freq'] = {'value': qso['freq'], 'ts': _ts}
                         status_update = True
                     if ('callsign' not in status_data or status_data['callsign']['ts'] < _ts):
-                        status_data['freq'] = {'value': qso['myCS'], 'ts': _ts}
+                        status_data['callsign'] = {'value': qso['myCS'], 'ts': _ts}
                         status_update = True
                     if status_update:
                         await write_station_file(callsign, 'status.json', status_data)
