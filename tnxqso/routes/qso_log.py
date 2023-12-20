@@ -181,8 +181,14 @@ async def log_handler(data, *, callsign, **_):
                 if new_qso:
                     status_data = await read_station_file(callsign, 'status.json')
                     _ts = dtime.timestamp() + tzOffset()
+                    status_update = False
                     if ('freq' not in status_data or status_data['freq']['ts'] < _ts):
                         status_data['freq'] = {'value': qso['freq'], 'ts': _ts}
+                        status_update = True
+                    if ('callsign' not in status_data or status_data['callsign']['ts'] < _ts):
+                        status_data['freq'] = {'value': qso['myCS'], 'ts': _ts}
+                        status_update = True
+                    if status_update:
                         await write_station_file(callsign, 'status.json', status_data)
 
                     qso['ts'] = time.time()
