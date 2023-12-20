@@ -2,5 +2,5 @@
 cd ../tnxqso
 git pull
 systemctl stop tnxqso
-migrate -path db-migrations -database postgres:///tnxqso?host=/var/run/postgresql/ up
+su -c "migrate -path db-migrations -database postgres:///tnxqso?host=/var/run/postgresql/ up" postgres
 systemctl start tnxqso
