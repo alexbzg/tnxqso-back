@@ -27,11 +27,12 @@ def get_station_path(callsign):
 
 async def get_station_path_by_admin_cs(admin_cs):
     station_cs = await DB.get_station_callsign(admin_cs)
+    if not station_cs:
+        raise web.HTTPBadRequest(text='Expedition profile is not initialized.')
     return get_station_path(station_cs)
 
 async def update_station_settings(callsign, settings):
-    old_data = await DB.get_user_data(callsign)
-    station_callsign = old_data['settings']['station']['callsign']
+    station_callsign = await DB.get_station_callsign(callsign)
     station_path = get_station_path(station_callsign) if station_callsign else None
     publish_path = WEB_ROOT + '/js/publish.json'
     publish = loadJSON(publish_path) or {}
