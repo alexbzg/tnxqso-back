@@ -55,7 +55,7 @@ def cosd(deg):
 
 async def wfs_query(wfs_type, location, strict=False):
     params = WFS_PARAMS[wfs_type]
-    url = ('https://r1cf.ru:8088/geoserver/cite/wfs?SERVICE=WFS&REQUEST=GetFeature&TypeName=' +
+    url = ('https://map.r1cf.ru/geoserver/cite/wfs?SERVICE=WFS&REQUEST=GetFeature&TypeName=' +
         '{feature}&VERSION=1.1.0&CQL_FILTER={predi}%28the_geom,POINT%28{lat}%20{lng}%29' +
         '{addParams}%29')
     url_params = {
