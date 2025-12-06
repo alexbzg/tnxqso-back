@@ -32,10 +32,10 @@ with open(appRoot + '/rafa.csv', 'r') as f_rafa:
 LAST_SPOT_SENT = None
 
 WFS_PARAMS = {
-        "rda": {"feature": "RDA_2025X", "tag": "RDA"},
-        "waip": {"feature": "WAIP2Х", "tag": "WAIPIT"},
+        "rda": {"feature": "RDA_2025X", "tag": "rda"},
+        "waip": {"feature": "WAIP2Х", "tag": "waipit"},
         "wab": {"feature": "WAB", "tag": "NAME"},
-        "kda": {"feature": "KDAX", "tag": "KDA"}
+        "kda": {"feature": "KDAX", "tag": "kda"}
 }
 
 QTH_PARAMS = loadJSON(WEB_ROOT + '/js/qthParams.json')
@@ -56,7 +56,7 @@ def cosd(deg):
 async def wfs_query(wfs_type, location, strict=False):
     params = WFS_PARAMS[wfs_type]
     url = ('https://map.r1cf.ru/geoserver/cite/wfs?SERVICE=WFS&REQUEST=GetFeature&TypeName=' +
-        '{feature}&VERSION=1.1.0&CQL_FILTER={predi}%28the_geom,POINT%28{lat}%20{lng}%29' +
+        '{feature}&VERSION=1.1.0&CQL_FILTER={predi}%28geom,POINT%28{lat}%20{lng}%29' +
         '{addParams}%29')
     url_params = {
         'feature': params['feature'],\
