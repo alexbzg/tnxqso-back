@@ -31,11 +31,11 @@ with open(appRoot + '/rafa.csv', 'r') as f_rafa:
 
 LAST_SPOT_SENT = None
 
-WFS_PARAMS = {\
-        "rda": {"feature": "RDA_2020", "tag": "RDA"},\
-        "waip": {"feature": "WAIP2", "tag": "WAIPIT"},\
+WFS_PARAMS = {
+        "rda": {"feature": "RDA_2025X", "tag": "RDA"},
+        "waip": {"feature": "WAIP2Х", "tag": "WAIPIT"},
         "wab": {"feature": "WAB", "tag": "NAME"},
-        "kda": {"feature": "KDA_layer", "tag": "KDA"}
+        "kda": {"feature": "KDAX", "tag": "KDA"}
 }
 
 QTH_PARAMS = loadJSON(WEB_ROOT + '/js/qthParams.json')
