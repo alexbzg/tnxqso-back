@@ -63,7 +63,7 @@ async def wfs_query(wfs_type, location, strict=False):
         'predi': 'INTERSECTS' if strict else 'DWITHIN',\
         'lat': location[0],\
         'lng': location[1],\
-        'addParams': '' if strict else ',0.0025,kilometers' # ~250 meters
+        'addParams': '' if strict else ',0.25,kilometers' # ~250 meters
        }
     try:
         data = ''
