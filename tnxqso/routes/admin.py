@@ -25,12 +25,15 @@ async def suspicious_handler(_):
 async def publish_handler(data, **_):
     publish_path = WEB_ROOT + '/js/publish.json'
     publish = loadJSON(publish_path) or {}
-    publish[data['station']] = data['publish']
+    publish_settings = data['publish']
+    if not isinstance(publish_settings, dict):
+        publish_settings = {'user': bool(publish_settings), 'admin': bool(publish_settings)}
+    publish[data['station']] = publish_settings
     with open(publish_path, 'w') as f_publish:
         json.dump(publish, f_publish, ensure_ascii = False)
     station_path = get_station_path(data['station'])
     station_settings = loadJSON(station_path + '/settings.json')
-    station_settings['publish'] = data['publish']['user']
+    station_settings['publish'] = publish_settings['user']
     await save_station_settings(station_settings['admin'], station_settings)
     return web.Response(text = 'OK')
 

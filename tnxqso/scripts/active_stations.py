@@ -39,9 +39,14 @@ def main():
     data = []
     today = datetime.utcnow().date()
     now = time.time()
+    fix_publish_flag = False
 
-
-    for callsign, publish_settings in publish.items():
+    for callsign, publish_settings in list(publish.items()):
+        if not isinstance(publish_settings, dict):
+            logging.error("Invalid publish entry for callsign %s", callsign)
+            publish_settings = {'user': publish_settings, 'admin': publish_settings}
+            fix_publish_flag = True
+            publish['callsingn'] = publish_settings
         if all(publish_settings.values()):
             try:
                 station_path = get_station_path(callsign)
@@ -75,5 +80,10 @@ def main():
     data.sort(key=lambda item: item['callsign'])
     with open(f'{WEB_ROOT}/js/activeStations.json', 'w') as f_stations:
         json.dump(data, f_stations, ensure_ascii = False)
+
+    if fix_publish_flag:
+        with open(f'{WEB_ROOT}/js/publish.json', 'w') as f_publish:
+            json.dump(publish, f_publish, ensure_ascii = False)
+    
 
     asyncio.run(rabbitmq_post(data))
