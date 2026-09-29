@@ -27,7 +27,7 @@ async def publish_handler(data, **_):
     publish = loadJSON(publish_path) or {}
     publish_settings = data['publish']
     if not isinstance(publish_settings, dict):
-        publish_settings = {'user': bool(publish_settings), 'admin': bool(publish_settings)}
+        publish_settings = {'user': True, 'admin': bool(publish_settings)}
     publish[data['station']] = publish_settings
     with open(publish_path, 'w') as f_publish:
         json.dump(publish, f_publish, ensure_ascii = False)
